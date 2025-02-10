@@ -1,0 +1,95 @@
+definitions:
+  server.chatRequest:
+    properties:
+      chat:
+        type: string
+      history:
+        items:
+          $ref: '#/definitions/server.content'
+        type: array
+    type: object
+  server.content:
+    properties:
+      parts:
+        items:
+          $ref: '#/definitions/server.part'
+        type: array
+      role:
+        type: string
+    type: object
+  server.part:
+    properties:
+      text:
+        type: string
+    type: object
+info:
+  contact:
+    email: harsha@harshanu.space
+    name: API Support
+    url: https://nannyai.harshanu.space/support
+  license:
+    name: GNU General Public License v3.0
+    url: https://www.gnu.org/licenses/gpl-3.0.html
+paths:
+  /chat:
+    post:
+      consumes:
+      - application/json
+      description: Chat with the model
+      parameters:
+      - description: Chat request
+        in: body
+        name: chat
+        required: true
+        schema:
+          $ref: '#/definitions/server.chatRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      summary: Chat with the model
+      tags:
+      - chat
+  /status:
+    get:
+      consumes:
+      - application/json
+      description: Status of the API
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      summary: Status of the API
+      tags:
+      - status
+swagger: "2.0"
