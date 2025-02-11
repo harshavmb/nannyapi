@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 
 	"github.com/google/generative-ai-go/genai"
+	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/pkg/api"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
@@ -15,6 +16,7 @@ import (
 type Server struct {
 	mux          *http.ServeMux
 	geminiClient *api.GeminiClient
+	githubAuth   *auth.GitHubAuth
 }
 
 // startChat starts a chat session with the model using the given history.
@@ -26,9 +28,9 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 }
 
 // NewServer creates a new Server instance
-func NewServer(geminiClient *api.GeminiClient) *Server {
+func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth) *Server {
 	mux := http.NewServeMux()
-	server := &Server{mux: mux, geminiClient: geminiClient}
+	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth}
 	server.routes()
 	return server
 }
@@ -40,7 +42,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
 	))
-	s.mux.HandleFunc("/", s.handleStatus())
+	s.mux.HandleFunc("/github/login", s.githubAuth.HandleGitHubLogin())
+	s.mux.HandleFunc("/github/callback", s.githubAuth.HandleGitHubCallback())
+	s.mux.HandleFunc("/github/profile", s.githubAuth.HandleGitHubProfile())
+
+	// Serve static files from the "static" directory
+	fs := http.FileServer(http.Dir("./static"))
+	s.mux.Handle("/", fs)
 }
 
 // chatHandler returns the complete response of the model to the client. Expects a JSON payload in
@@ -112,13 +120,6 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 		sendGeminiFeedbackToClient(w, geminiFeedback)        // Helper to send the feedback
 	}
 
-}
-
-// handleIndex handles the index route
-func (s *Server) handleIndex() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "Let the fun of investigating issues on Linux machine being now :)")
-	}
 }
 
 // handleIndex handles the index and status routes
