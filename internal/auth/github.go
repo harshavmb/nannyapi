@@ -4,12 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"math/big"
 	"net/http"
+	"net/url"
+	"reflect"
 	"time"
 
+	"github.com/harshavmb/nannyapi/internal/user"
 	"golang.org/x/oauth2"
 	githubOAuth2 "golang.org/x/oauth2/github"
 )
@@ -110,6 +114,15 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			return
 		}
 
+		// Check if user info is already in the cookie
+		userCookie, err := r.Cookie("userinfo")
+		if err == nil && userCookie.Value != "" {
+			// User info found in cookie, redirect to index
+			redirectURL := "/"
+			http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+			return
+		}
+
 		client := g.oauthConf.Client(context.Background(), &oauth2.Token{AccessToken: tokenCookie.Value})
 		resp, err := client.Get("https://api.github.com/user")
 		if err != nil {
@@ -129,7 +142,116 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(userInfo)
+		user := user.User{
+			ID: fmt.Sprintf("%v", userInfo["id"]), // Still using the GitHub ID, handle as needed
+		}
+
+		// Use reflection to dynamically map fields
+		userValue := reflect.ValueOf(&user).Elem()
+		userType := userValue.Type()
+
+		for i := 0; i < userType.NumField(); i++ {
+			field := userType.Field(i)
+			fieldName := field.Name
+			jsonTag := field.Tag.Get("json")
+
+			if jsonTag == "" {
+				continue // Skip fields without a json tag
+			}
+
+			if value, ok := userInfo[jsonTag]; ok {
+				fieldValue := userValue.Field(i)
+
+				if fieldValue.IsValid() && fieldValue.CanSet() {
+					switch fieldValue.Kind() {
+					case reflect.String:
+						if strValue, ok := value.(string); ok {
+							fieldValue.SetString(strValue)
+						} else {
+							log.Printf("Expected string for field %s, got %T", fieldName, value)
+						}
+					// Add other type conversions as needed (int, bool, etc.)
+					default:
+						log.Printf("Unsupported type for field %s", fieldName)
+					}
+				}
+			}
+		}
+
+		// Fetch email from GitHub API if not already set
+		if user.Email == "" {
+			email, err := fetchEmailFromGitHubAPI(w, client)
+			if err != nil {
+				log.Printf("Failed to fetch email from GitHub API: %v", err)
+			}
+			if email != "" {
+				user.Email = email
+			} else {
+				log.Printf("No email found for user: %s", user.ID)
+			}
+		}
+
+		// Store user info in a cookie
+		userJSON, err := json.Marshal(user)
+		if err != nil {
+			log.Printf("Failed to marshal user info: %v", err)
+			http.Error(w, "Failed to store user info", http.StatusInternalServerError)
+			return
+		}
+
+		// URL-encode the JSON string
+		encodedUserJSON := url.QueryEscape(string(userJSON))
+
+		userCookie = &http.Cookie{
+			Name:     "userinfo",
+			Value:    encodedUserJSON,
+			Path:     "/",
+			Secure:   true,                    // Only send over HTTPS
+			SameSite: http.SameSiteStrictMode, // Mitigate CSRF attacks
+			Expires:  time.Now().Add(24 * time.Hour),
+		}
+		http.SetCookie(w, userCookie)
+
+		// Redirect to index
+		redirectURL := "/"
+		http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 	}
+}
+
+// fetchEmailFromGitHubAPI fetches the email from the GitHub API
+// and sets it in the user struct
+// This is the case when the email is marked private in the GitHub settings
+// More details :: https://stackoverflow.com/questions/35373995/github-user-email-is-null-despite-useremail-scope
+func fetchEmailFromGitHubAPI(w http.ResponseWriter, client *http.Client) (string, error) {
+	resp, err := client.Get("https://api.github.com/user/emails")
+	if err != nil {
+		http.Error(w, "Failed to get user info: "+err.Error(), http.StatusInternalServerError)
+		return "", fmt.Errorf("failed to get user email info: %s", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, "Failed to get user email info: "+resp.Status, resp.StatusCode)
+		return "", fmt.Errorf("failed to get user email info: %s", err)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, "Failed to read user email response body: "+err.Error(), http.StatusInternalServerError)
+		return "", fmt.Errorf("failed to read user email response body: %s", err)
+	}
+
+	var emails []user.GitHubEmail
+	if err := json.Unmarshal(body, &emails); err != nil {
+		http.Error(w, "Failed to unmarshal email info: "+err.Error(), http.StatusInternalServerError)
+		return "", fmt.Errorf("failed to unmarshal email info: %s", err)
+	}
+
+	for _, email := range emails {
+		if email.Primary {
+			return email.Email, nil
+		}
+	}
+
+	return "", fmt.Errorf("no primary email found")
 }

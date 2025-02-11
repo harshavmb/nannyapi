@@ -10,13 +10,15 @@
 </head>
 <body>
     <div class="container mt-5">
-        <h1 class="text-center">NannyAPI Frontend</h1>
+        <h1 class="text-center">NannyAPI Frontend</h1>        
         <div id="login-section" class="text-center mt-4">
             <button id="login-button" class="btn btn-primary">
                 <i class="fab fa-github"></i> Login with GitHub
             </button>
         </div>
         <div id="profile-section" class="mt-4" style="display:none;">
+            <h1>Welcome <span id="userName"></span>!</h1>
+            <img id="userAvatar" src="" alt="User Avatar" width="50" height="50">
             <h2>GitHub Profile</h2>
             <p id="profile-info"></p>
             <a id="profile-link" href="#" target="_blank" class="btn btn-info">View GitHub Profile</a>
