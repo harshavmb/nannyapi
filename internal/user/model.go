@@ -1,10 +1,18 @@
 package user
 
+import (
+	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+)
+
 type User struct {
-	ID        string `json:"id"`
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	AvatarURL string `json:"avatar_url"`
+	ID           bson.ObjectID `json:"id" bson:"_id,omitempty"`
+	Email        string        `json:"email" bson:"email"`
+	Name         string        `json:"name" bson:"name"`
+	AvatarURL    string        `json:"avatar_url" bson:"avatar_url"`
+	HTMLURL      string        `json:"html_url" bson:"html_url"`
+	LastLoggedIn time.Time     `json:"last_logged_in" bson:"last_logged_in"`
 }
 
 type GitHubEmail struct {

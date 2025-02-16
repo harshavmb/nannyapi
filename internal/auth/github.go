@@ -19,8 +19,9 @@ import (
 )
 
 type GitHubAuth struct {
-	oauthConf *oauth2.Config
-	randSrc   io.Reader
+	oauthConf   *oauth2.Config
+	randSrc     io.Reader
+	userService *user.UserService
 }
 
 func (g *GitHubAuth) generateStateString() (string, error) {
@@ -42,7 +43,7 @@ func (g *GitHubAuth) generateStateString() (string, error) {
 // The "Authorization callback URL" you set there must match the redirect URL
 // you use in your code.  For local testing, something like
 // "http://localhost:8080/github/callback" is typical.
-func NewGitHubAuth(clientID, clientSecret, redirectURL string) *GitHubAuth {
+func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user.UserService) *GitHubAuth {
 	return &GitHubAuth{
 		oauthConf: &oauth2.Config{
 			ClientID:     clientID,
@@ -51,7 +52,8 @@ func NewGitHubAuth(clientID, clientSecret, redirectURL string) *GitHubAuth {
 			Scopes:       []string{"user:email"},
 			Endpoint:     githubOAuth2.Endpoint,
 		},
-		randSrc: rand.Reader,
+		randSrc:     rand.Reader,
+		userService: userService,
 	}
 }
 
@@ -142,9 +144,7 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			return
 		}
 
-		user := user.User{
-			ID: fmt.Sprintf("%v", userInfo["id"]), // Still using the GitHub ID, handle as needed
-		}
+		user := user.User{}
 
 		// Use reflection to dynamically map fields
 		userValue := reflect.ValueOf(&user).Elem()
@@ -162,7 +162,7 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			if value, ok := userInfo[jsonTag]; ok {
 				fieldValue := userValue.Field(i)
 
-				if fieldValue.IsValid() && fieldValue.CanSet() {
+				if fieldValue.IsValid() && fieldValue.CanSet() && fieldName != "ID" {
 					switch fieldValue.Kind() {
 					case reflect.String:
 						if strValue, ok := value.(string); ok {
@@ -186,8 +186,9 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			}
 			if email != "" {
 				user.Email = email
+				userInfo["email"] = email
 			} else {
-				log.Printf("No email found for user: %s", user.ID)
+				log.Printf("No email found for user: %d", user.ID)
 			}
 		}
 
@@ -211,6 +212,11 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			Expires:  time.Now().Add(24 * time.Hour),
 		}
 		http.SetCookie(w, userCookie)
+
+		// Save user information to the database
+		if err := g.userService.SaveUser(r.Context(), userInfo); err != nil {
+			http.Error(w, "Failed to save user info: "+err.Error(), http.StatusInternalServerError)
+		}
 
 		// Redirect to index
 		redirectURL := "/"

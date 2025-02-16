@@ -10,6 +10,7 @@ import (
 	"github.com/harshavmb/nannyapi/docs"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/server"
+	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/harshavmb/nannyapi/pkg/database"
 	"github.com/rs/cors"
@@ -48,16 +49,20 @@ func main() {
 	}
 
 	// Initialize MongoDB client
-	_, err = database.InitDB()
+	mongoDB, err := database.InitDB()
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
+
+	// Initialize User Repository and Service
+	userRepo := user.NewUserRepository(mongoDB)
+	userService := user.NewUserService(userRepo)
 
 	// Initialize GitHub OAuth
 	githubClientID := os.Getenv("GITHUB_CLIENT_ID")
 	githubClientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
 	githubRedirectURL := "http://localhost:8080/github/callback"
-	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL)
+	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
 
 	// Create server with Gemini client
 	srv := server.NewServer(geminiClient, githubAuth)

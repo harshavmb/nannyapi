@@ -39,6 +39,10 @@ function displayUserInfo() {
             if (userInfo.avatar_url) {
                 document.getElementById('userAvatar').src = userInfo.avatar_url;
             }
+
+            if (userInfo.html_url) {
+                document.getElementById('userProfile').src = userInfo.html_url;
+            }
         } catch (error) {
             console.error('Error parsing userinfo cookie:', error);
         }
