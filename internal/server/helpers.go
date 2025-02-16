@@ -6,8 +6,10 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"os"
 
 	"github.com/google/generative-ai-go/genai"
+	"github.com/harshavmb/nannyapi/internal/user"
 )
 
 // chatRequest represents the request payload for the chat handler
@@ -114,4 +116,30 @@ func extractGeminiFeedback(res *genai.GenerateContentResponse) string {
 func sendGeminiFeedbackToClient(w http.ResponseWriter, feedback string) {
 	// Send Gemini's feedback back to the client (as JSON)
 	json.NewEncoder(w).Encode(map[string]string{"feedback": feedback})
+}
+
+func (s *Server) getMaskedAuthToken(r *http.Request, userEmail string) (string, error) {
+	authToken, err := s.userRepo.GetAuthToken(r.Context(), userEmail)
+	if err != nil {
+		log.Fatalf("Failed to get auth token: %v", err)
+		return "", err // Return nil error as it could be that token is not created yet
+	}
+
+	encryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
+
+	var decryptedToken string
+
+	if authToken != nil {
+		decryptedToken, err = user.Decrypt(authToken.Token, encryptionKey)
+		if err != nil {
+			return "", err
+		}
+		if len(decryptedToken) <= 6 {
+			return decryptedToken, nil // Return the whole token if it's too short
+		}
+
+		maskedToken := decryptedToken[:4] + "..." + decryptedToken[len(decryptedToken)-2:]
+		return maskedToken, nil
+	}
+	return "", nil // Return nil error as it could be that token is not created yet
 }

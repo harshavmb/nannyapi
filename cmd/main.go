@@ -54,6 +54,11 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
+	// Check if NANNY_ENCRYPTION_KEY is present in env vars
+	if os.Getenv("NANNY_ENCRYPTION_KEY") == "" {
+		log.Fatalf("NANNY_ENCRYPTION_KEY not set")
+	}
+
 	// Initialize User Repository and Service
 	userRepo := user.NewUserRepository(mongoDB)
 	userService := user.NewUserService(userRepo)
@@ -65,7 +70,7 @@ func main() {
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
 
 	// Create server with Gemini client
-	srv := server.NewServer(geminiClient, githubAuth)
+	srv := server.NewServer(geminiClient, githubAuth, userRepo)
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{
