@@ -53,11 +53,11 @@ func encrypt(stringToEncrypt, encryptionKey string) (string, error) {
 
 	//Encrypt the data using aesGCM.Seal
 	ciphertext := aesGCM.Seal(nonce, nonce, plaintext, nil)
-	return fmt.Sprintf("%x", ciphertext), nil
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
 // Decrypt method
-func Decrypt(encryptedString string, encryptionKey string) (string, error) {
+func decrypt(encryptedString string, encryptionKey string) (string, error) {
 	// Base64 decode the encryption key
 	key, err := base64.StdEncoding.DecodeString(encryptionKey)
 	if err != nil {
@@ -68,6 +68,8 @@ func Decrypt(encryptedString string, encryptionKey string) (string, error) {
 	if len(key) != 32 {
 		return "", fmt.Errorf("invalid key size %d, key size must be 32 bytes for AES-256", len(key))
 	}
+
+	// Base64 decode the encrypted string
 	enc, err := base64.StdEncoding.DecodeString(encryptedString)
 	if err != nil {
 		return "", fmt.Errorf("failed to base64 decode encrypted string: %v", err)

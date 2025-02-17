@@ -25,4 +25,5 @@ type AuthToken struct {
 	Email     string    `json:"email" bson:"email"`
 	Token     string    `bson:"token" json:"token"`
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
+	Retrieved bool      `bson:"retrieved" json:"retrieved"`
 }

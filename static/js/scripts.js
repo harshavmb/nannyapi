@@ -36,10 +36,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (profileLinkElement) {
                 profileLinkElement.href = userInfo.html_url;
             }
-
-            if (profileInfoElement) {
-                profileInfoElement.textContent = `Login: ${userInfo.login}, ID: ${userInfo.id}`;
-            }
+           
         } catch (error) {
             console.error("Error parsing userinfo cookie:", error);
         }

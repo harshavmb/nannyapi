@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 
 	"encoding/json"
 
@@ -22,13 +23,13 @@ type Server struct {
 	geminiClient *api.GeminiClient
 	githubAuth   *auth.GitHubAuth
 	template     *template.Template
-	userRepo     *user.UserRepository
+	userService  *user.UserService
 }
 
 // TemplateData struct
 type TemplateData struct {
 	User      user.User
-	AuthToken string
+	AuthToken *user.AuthToken
 }
 
 // startChat starts a chat session with the model using the given history.
@@ -40,10 +41,10 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 }
 
 // NewServer creates a new Server instance
-func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userRepo *user.UserRepository) *Server {
+func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService) *Server {
 	mux := http.NewServeMux()
 	tmpl := template.Must(template.ParseFiles("./static/index.html"))
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userRepo: userRepo}
+	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userService: userService}
 	server.routes()
 	return server
 }
@@ -171,6 +172,11 @@ func (s *Server) handleCreateAuthToken() http.HandlerFunc {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
+		encryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
+		if encryptionKey == "" {
+			return
+		}
+
 		if userCookie.Value != "" {
 			decodedValue, err := url.QueryUnescape(userCookie.Value)
 			if err != nil {
@@ -189,7 +195,7 @@ func (s *Server) handleCreateAuthToken() http.HandlerFunc {
 
 			// Create auth token
 			log.Printf("Creating auth token for user %s", user.Email)
-			authToken, err := s.userRepo.CreateAuthToken(r.Context(), user.Email)
+			authToken, err := s.userService.CreateAuthToken(r.Context(), user.Email, encryptionKey)
 			if err != nil {
 				log.Printf("Failed to create auth token: %v", err)
 				http.Error(w, "Failed to create auth token", http.StatusInternalServerError)
@@ -211,6 +217,12 @@ func (s *Server) handleCreateAuthToken() http.HandlerFunc {
 // handleIndex handles the index route
 func (s *Server) handleIndex() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		encryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
+		if encryptionKey == "" {
+			return
+		}
+
 		// Check if user info is already in the cookie
 		userCookie, err := r.Cookie("userinfo")
 		if err == nil && userCookie.Value != "" {
@@ -230,7 +242,7 @@ func (s *Server) handleIndex() http.HandlerFunc {
 			}
 
 			// Retrieve auth token
-			authToken, err := s.getMaskedAuthToken(r, user.Email)
+			authToken, err := s.getMaskedAuthToken(r, user.Email, encryptionKey)
 			if err != nil {
 				log.Printf("Failed to retrieve auth token: %v", err)
 				http.Error(w, "Failed to retrieve auth token", http.StatusInternalServerError)
@@ -242,7 +254,7 @@ func (s *Server) handleIndex() http.HandlerFunc {
 				AuthToken: authToken,
 			}
 
-			if authToken != "" {
+			if authToken != nil {
 				s.template.Execute(w, data)
 				return
 			}

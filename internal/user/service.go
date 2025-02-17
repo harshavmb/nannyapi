@@ -2,9 +2,7 @@ package user
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -12,18 +10,20 @@ import (
 )
 
 type UserService struct {
-	repo *UserRepository
+	userRepo      *UserRepository
+	authTokenRepo *AuthTokenRepository
 }
 
-func NewUserService(repo *UserRepository) *UserService {
+func NewUserService(userRepo *UserRepository, authTokenRepo *AuthTokenRepository) *UserService {
 	return &UserService{
-		repo: repo,
+		userRepo:      userRepo,
+		authTokenRepo: authTokenRepo,
 	}
 }
 
 func (s *UserService) SaveUser(ctx context.Context, userInfo map[string]interface{}) error {
 	// Check if a user with the given email already exists
-	existingUser, err := s.repo.FindUserByEmail(ctx, userInfo["email"].(string))
+	existingUser, err := s.userRepo.FindUserByEmail(ctx, userInfo["email"].(string))
 	if err != nil {
 		log.Fatalf("Failed to find user by email: %v", err)
 		return err
@@ -47,7 +47,7 @@ func (s *UserService) SaveUser(ctx context.Context, userInfo map[string]interfac
 		LastLoggedIn: time.Now(),
 	}
 	log.Printf("Saving user: %v", user.Email)
-	_, err = s.repo.UpsertUser(ctx, user)
+	_, err = s.userRepo.UpsertUser(ctx, user)
 	if err != nil {
 		log.Fatalf("Failed to save user: %v", err)
 		return err
@@ -55,15 +55,10 @@ func (s *UserService) SaveUser(ctx context.Context, userInfo map[string]interfac
 	return nil
 }
 
-func (r *UserRepository) CreateAuthToken(ctx context.Context, userEmail string) (*AuthToken, error) {
+func (s *UserService) CreateAuthToken(ctx context.Context, userEmail, encryptionKey string) (*AuthToken, error) {
 	token, err := generateRandomToken(32)
 	if err != nil {
 		return nil, err
-	}
-
-	encryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
-	if encryptionKey == "" {
-		return nil, fmt.Errorf("NANNY_ENCRYPTION_KEY not set")
 	}
 
 	encryptedToken, err := encrypt(token, encryptionKey)
@@ -71,40 +66,53 @@ func (r *UserRepository) CreateAuthToken(ctx context.Context, userEmail string) 
 		return nil, err
 	}
 
-	authToken := &AuthToken{
-		Email:     userEmail,
-		Token:     encryptedToken,
-		CreatedAt: time.Now(),
-	}
-
-	collection := r.collection.Database().Collection("auth_tokens")
-	tokenResult, err := collection.InsertOne(ctx, authToken)
-	if err != nil {
-		return nil, err
-	}
-
-	if tokenResult.Acknowledged {
-		log.Printf("Created auth token for user %s", userEmail)
-	}
-
-	return authToken, nil
+	return s.authTokenRepo.CreateAuthToken(ctx, encryptedToken, userEmail)
 }
 
-func (r *UserRepository) GetAuthToken(ctx context.Context, userEmail string) (*AuthToken, error) {
-	collection := r.collection.Database().Collection("auth_tokens")
-	if collection == nil {
-		return nil, nil // Collections itself is nil
-	}
-	filter := bson.M{"email": userEmail}
-
-	var authToken AuthToken
-	err := collection.FindOne(ctx, filter).Decode(&authToken)
+func (s *UserService) GetAuthToken(ctx context.Context, userEmail, encryptionKey string) (*AuthToken, error) {
+	authToken, err := s.authTokenRepo.GetAuthTokenByEmail(ctx, userEmail)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, nil // No auth token found
-		}
 		return nil, err
 	}
 
-	return &authToken, nil
+	if authToken == nil {
+		return nil, mongo.ErrNoDocuments // No auth token found
+	}
+
+	var decryptedToken string
+
+	if !authToken.Retrieved {
+		// First time retrieval, return plain-text token
+		decryptedToken, err = decrypt(authToken.Token, encryptionKey)
+		if err != nil {
+			return nil, err
+		}
+		// Update the retrieved flag
+		authToken.Retrieved = true
+		err = s.authTokenRepo.UpdateAuthToken(ctx, authToken)
+		if err != nil {
+			return nil, err
+		}
+		authToken.Token = decryptedToken
+		return authToken, nil
+	}
+
+	// Mask the token if already retrieved
+	if authToken.Retrieved {
+		decryptedToken, err = decrypt(authToken.Token, encryptionKey)
+		if err != nil {
+			return nil, err
+		}
+		if len(decryptedToken) <= 6 {
+			authToken.Token = decryptedToken
+			return authToken, nil // Return the whole token if it's too short
+		}
+
+		maskedToken := decryptedToken[:4] + "..." + decryptedToken[len(decryptedToken)-2:]
+
+		authToken.Token = maskedToken
+		return authToken, nil
+	}
+
+	return nil, nil
 }

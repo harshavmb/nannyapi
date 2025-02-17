@@ -61,16 +61,17 @@ func main() {
 
 	// Initialize User Repository and Service
 	userRepo := user.NewUserRepository(mongoDB)
-	userService := user.NewUserService(userRepo)
+	authTokenRepo := user.NewAuthTokenRepository(mongoDB)
+	userService := user.NewUserService(userRepo, authTokenRepo)
 
 	// Initialize GitHub OAuth
-	githubClientID := os.Getenv("GITHUB_CLIENT_ID")
-	githubClientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
+	githubClientID := os.Getenv("GH_CLIENT_ID")
+	githubClientSecret := os.Getenv("GH_CLIENT_SECRET")
 	githubRedirectURL := "http://localhost:8080/github/callback"
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
 
 	// Create server with Gemini client
-	srv := server.NewServer(geminiClient, githubAuth, userRepo)
+	srv := server.NewServer(geminiClient, githubAuth, userService)
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{

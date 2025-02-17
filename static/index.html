@@ -27,12 +27,13 @@
             </button>
 
             {{if .AuthToken}}
-            <p>Auth Token: {{.AuthToken}}</p>
+            <p>Auth Token: {{.AuthToken.Token}} created at: {{.AuthToken.CreatedAt}}</p>
             {{else}}
+            <p>No auth tokens found. Create one now.</p>
+            {{end}}
             <form action="/create-auth-token" method="post">
                 <button type="submit" class="btn btn-success mt-2">Create Auth Token</button>
             </form>
-            {{end}}
         </div>
     </div>
 
