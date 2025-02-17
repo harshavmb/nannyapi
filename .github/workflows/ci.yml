@@ -29,5 +29,7 @@ jobs:
       env:
         GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
         GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
-        MONGODB_URI: '${{ secrets.MONGODB_URI }}'
+        MONGODB_URI: '${{ secrets.MONGODB_HOST }}'
+        MONGODB_USERNAME: '${{ secrets.MONGODB_USERNAME }}'
+        MONGODB_PASSWORD: '${{ secrets.MONGODB_PASSWORD }}'
         NANNY_ENCRYPTION_KEY: ${{ secrets.NANNY_ENCRYPTION_KEY }}

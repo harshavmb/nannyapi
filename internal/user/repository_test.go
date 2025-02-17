@@ -17,7 +17,7 @@ const (
 )
 
 func setupTestDB(t *testing.T) (*mongo.Client, func()) {
-	mongoURI := os.Getenv("MONGODB_URI")
+	mongoURI := "mongodb+srv://" + os.Getenv("MONGODB_USERNAME") + ":" + os.Getenv("MONGODB_PASSWORD") + "@" + os.Getenv("MONGODB_HOST") + "/?retryWrites=true&w=majority&appName=nannyai"
 	clientOptions := options.Client().ApplyURI(mongoURI)
 	client, err := mongo.Connect(clientOptions)
 	if err != nil {
