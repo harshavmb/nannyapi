@@ -105,7 +105,10 @@ func TestAuthTokenRepository(t *testing.T) {
 			Token: "some-token",
 		}
 
-		result, err := repo.CreateAuthToken(context.Background(), authToken.Token, authToken.Email)
+		// Hash the token
+		hashedToken := HashToken(authToken.Token)
+
+		result, err := repo.CreateAuthToken(context.Background(), authToken.Token, authToken.Email, hashedToken)
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
@@ -122,7 +125,11 @@ func TestAuthTokenRepository(t *testing.T) {
 			Email: "findme@example.com",
 			Token: "some-token",
 		}
-		_, err := repo.CreateAuthToken(context.Background(), authToken.Token, authToken.Email)
+
+		// Hash the token
+		hashedToken := HashToken(authToken.Token)
+
+		_, err := repo.CreateAuthToken(context.Background(), authToken.Token, authToken.Email, hashedToken)
 		assert.NoError(t, err)
 
 		// Find the auth token by email

@@ -23,6 +23,111 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/auth-token/{id}": {
+            "delete": {
+                "description": "Deletes a specific auth token by ID.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-tokens"
+                ],
+                "summary": "Delete an auth token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Auth token deleted successfully",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid token ID format or Token ID is required",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to delete auth token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth-tokens": {
+            "get": {
+                "description": "Retrieves all auth tokens for the authenticated user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-tokens"
+                ],
+                "summary": "Get all auth tokens",
+                "responses": {
+                    "200": {
+                        "description": "Successfully retrieved auth tokens",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/server.AuthTokenData"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve auth tokens",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth-tokens": {
+            "get": {
+                "description": "Serves the auth tokens page.",
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "auth-tokens"
+                ],
+                "summary": "Get auth tokens page",
+                "responses": {
+                    "200": {
+                        "description": "Successfully served auth tokens page",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/chat": {
             "post": {
                 "description": "Chat with the model",
@@ -118,6 +223,20 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "server.AuthTokenData": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "maskedToken": {
+                    "type": "string"
+                }
+            }
+        },
         "server.chatRequest": {
             "type": "object",
             "properties": {

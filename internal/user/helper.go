@@ -4,21 +4,30 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
 )
 
+const (
+	// Alphanumeric characters for token generation
+	alphanumeric = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+)
+
+// generateRandomToken generates a random token of the specified length using alphanumeric characters.
 func generateRandomToken(length int) (string, error) {
-	b := make([]byte, length)
-	_, err := rand.Read(b)
-	if err != nil {
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}
-	return base64.StdEncoding.EncodeToString(b), nil
+	for i, b := range bytes {
+		bytes[i] = alphanumeric[b%byte(len(alphanumeric))]
+	}
+	return string(bytes), nil
 }
 
-func encrypt(stringToEncrypt, encryptionKey string) (string, error) {
+func Encrypt(stringToEncrypt, encryptionKey string) (string, error) {
 
 	// Base64 decode the encryption key
 	key, err := base64.StdEncoding.DecodeString(encryptionKey)
@@ -57,7 +66,7 @@ func encrypt(stringToEncrypt, encryptionKey string) (string, error) {
 }
 
 // Decrypt method
-func decrypt(encryptedString string, encryptionKey string) (string, error) {
+func Decrypt(encryptedString string, encryptionKey string) (string, error) {
 	// Base64 decode the encryption key
 	key, err := base64.StdEncoding.DecodeString(encryptionKey)
 	if err != nil {
@@ -100,4 +109,10 @@ func decrypt(encryptedString string, encryptionKey string) (string, error) {
 	}
 
 	return string(plaintext), nil
+}
+
+// hashToken hashes the token using SHA-256.
+func HashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return base64.StdEncoding.EncodeToString(hash[:])
 }

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Auth Token</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+
+<body>
+    <div class="container">
+        <div class="mt-5">
+            <h1>Auth Token Created</h1>
+            {{if .AuthToken}}
+            <p>Your Auth Token: <strong>{{.AuthToken.Token}}</strong></p>
+            <p>Created At: {{.AuthToken.CreatedAt}}</p>
+            <p>Save this token, it would be showed in cleartext only once.</p>
+            {{else}}
+            <p>Failed to create auth token.</p>
+            {{end}}
+            <a href="/" class="btn btn-primary mt-3">Go Back to Home</a>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="/static/js/scripts.js"></script>
+</body>
+
+</html>
