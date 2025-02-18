@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.22
+
+    - name: Install dependencies
+      run: go mod tidy
+
+    - name: Run tests
+      run: go test ./...
+      env:
+        GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
+        GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+        MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        NANNY_ENCRYPTION_KEY: ${{ secrets.NANNY_ENCRYPTION_KEY }}

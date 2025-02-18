@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/google/generative-ai-go/genai"
+	"github.com/harshavmb/nannyapi/internal/user"
 )
 
 // chatRequest represents the request payload for the chat handler
@@ -114,4 +115,15 @@ func extractGeminiFeedback(res *genai.GenerateContentResponse) string {
 func sendGeminiFeedbackToClient(w http.ResponseWriter, feedback string) {
 	// Send Gemini's feedback back to the client (as JSON)
 	json.NewEncoder(w).Encode(map[string]string{"feedback": feedback})
+}
+
+func (s *Server) getMaskedAuthToken(r *http.Request, userEmail, encryptionKey string) (*user.AuthToken, error) {
+
+	authToken, err := s.userService.GetAuthToken(r.Context(), userEmail, encryptionKey)
+	if err != nil {
+		log.Fatalf("Failed to get auth token: %v", err)
+		return nil, err // Return nil error as it could be that token is not created yet
+	}
+
+	return authToken, nil // Return nil error as it could be that token is not created yet
 }
