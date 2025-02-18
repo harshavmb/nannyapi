@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	testDBName         = "test_db"
+	testDBName         = "test_db2"
 	testCollectionName = "users"
 )
 
