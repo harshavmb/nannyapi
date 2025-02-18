@@ -24,11 +24,6 @@ jobs:
     - name: Install dependencies
       run: go mod tidy
 
-    - name: Print MongoDB URI
-      run: echo ${{ secrets.MONGODB_URI }}
-      env:
-        MONGODB_URI: ${{ secrets.MONGODB_URI }}
-
     - name: Run tests
       run: go test ./...
       env:
