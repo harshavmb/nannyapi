@@ -22,8 +22,10 @@ type GitHubEmail struct {
 }
 
 type AuthToken struct {
-	Email     string    `json:"email" bson:"email"`
-	Token     string    `bson:"token" json:"token"`
-	CreatedAt time.Time `bson:"created_at" json:"created_at"`
-	Retrieved bool      `bson:"retrieved" json:"retrieved"`
+	ID          bson.ObjectID `json:"id" bson:"_id,omitempty"`
+	Email       string        `json:"email" bson:"email"`
+	Token       string        `bson:"token" json:"token"`
+	HashedToken string        `bson:"hashed_token" json:"hashed_token"`
+	CreatedAt   time.Time     `bson:"created_at" json:"created_at"`
+	Retrieved   bool          `bson:"retrieved" json:"retrieved"`
 }

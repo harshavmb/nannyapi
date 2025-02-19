@@ -5,7 +5,6 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 
 	"encoding/json"
@@ -15,6 +14,7 @@ import (
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // Server represents the HTTP server
@@ -28,8 +28,15 @@ type Server struct {
 
 // TemplateData struct
 type TemplateData struct {
-	User      user.User
-	AuthToken *user.AuthToken
+	User       user.User
+	AuthToken  *user.AuthToken
+	AuthTokens []AuthTokenData
+}
+
+type AuthTokenData struct {
+	ID          string `json:"id"`
+	MaskedToken string `json:"maskedToken"`
+	CreatedAt   string `json:"createdAt"`
 }
 
 // startChat starts a chat session with the model using the given history.
@@ -43,7 +50,11 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 // NewServer creates a new Server instance
 func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService) *Server {
 	mux := http.NewServeMux()
-	tmpl := template.Must(template.ParseFiles("./static/index.html"))
+	templatePath := os.Getenv("NANNY_TEMPLATE_PATH")
+	if templatePath == "" {
+		templatePath = "./static/index.html" // Default template path
+	}
+	tmpl := template.Must(template.ParseFiles(templatePath))
 	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userService: userService}
 	server.routes()
 	return server
@@ -60,7 +71,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/github/callback", s.githubAuth.HandleGitHubCallback())
 	s.mux.HandleFunc("/github/profile", s.githubAuth.HandleGitHubProfile())
 	s.mux.HandleFunc("/", s.handleIndex())
-	s.mux.HandleFunc("/create-auth-token", s.handleCreateAuthToken())
+	s.mux.HandleFunc("POST /create-auth-token", s.handleCreateAuthToken())
+	s.mux.Handle("DELETE /auth-token/{id}", s.handleDeleteAuthToken())
+	//s.mux.HandleFunc("/api/auth-tokens", s.handleGetAuthTokens())
+	//s.mux.HandleFunc("DELETE /api/auth-tokens/{id}", s.handleDeleteAuthToken())
+	s.mux.HandleFunc("/auth-tokens", s.handleAuthTokensPage())
+
+	// API endoints with token authentication
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("/api/auth-tokens", s.handleGetAuthTokens())
+	apiMux.Handle("DELETE /api/auth-token/{id}", s.handleDeleteAuthToken())
+
+	s.mux.Handle("/api/", s.AuthMiddleware(apiMux))
 
 	// Serve static files from the "static" directory
 	fs := http.FileServer(http.Dir("./static"))
@@ -167,7 +189,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateAuthToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if user info is already in the cookie
-		userCookie, err := r.Cookie("userinfo")
+		userInfo, err := GetUserInfoFromCookie(r)
 		if err != nil {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
@@ -177,40 +199,50 @@ func (s *Server) handleCreateAuthToken() http.HandlerFunc {
 			return
 		}
 
-		if userCookie.Value != "" {
-			decodedValue, err := url.QueryUnescape(userCookie.Value)
-			if err != nil {
-				log.Printf("Failed to URL unescape user info: %v", err)
-				http.Error(w, "Failed to retrieve user info", http.StatusInternalServerError)
-				return
-			}
-
-			var user user.User
-			err = json.Unmarshal([]byte(decodedValue), &user)
-			if err != nil {
-				log.Printf("Failed to unmarshal user info: %v", err)
-				http.Error(w, "Failed to retrieve user info", http.StatusInternalServerError)
-				return
-			}
-
-			// Create auth token
-			log.Printf("Creating auth token for user %s", user.Email)
-			authToken, err := s.userService.CreateAuthToken(r.Context(), user.Email, encryptionKey)
-			if err != nil {
-				log.Printf("Failed to create auth token: %v", err)
-				http.Error(w, "Failed to create auth token", http.StatusInternalServerError)
-				return
-			}
-
-			if authToken == nil {
-				log.Printf("Failed to create auth token")
-				http.Error(w, "Failed to create auth token", http.StatusInternalServerError)
-				return
-			}
+		// Create auth token
+		log.Printf("Creating auth token for user %s", userInfo.Email)
+		authToken, err := s.userService.CreateAuthToken(r.Context(), userInfo.Email, encryptionKey)
+		if err != nil {
+			log.Printf("Failed to create auth token: %v", err)
+			http.Error(w, "Failed to create auth token", http.StatusInternalServerError)
+			return
 		}
 
-		// Redirect to index
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		if authToken == nil {
+			log.Printf("Failed to create auth token")
+			http.Error(w, "Failed to create auth token", http.StatusInternalServerError)
+			return
+		}
+
+		// Check if the auth token is already retrieved
+		if !authToken.Retrieved {
+			decryptedAuthToken, err := s.userService.GetAuthTokenByToken(r.Context(), authToken.Token)
+			if err != nil {
+				log.Printf("Failed to retrieve auth token: %v", err)
+				http.Error(w, "Failed to retrieve auth token", http.StatusInternalServerError)
+				return
+			}
+			authToken.Token = decryptedAuthToken.Token
+		}
+
+		// Render the create-auth-token.html page
+		tmpl, err := template.ParseFiles("./static/create_auth_token.html")
+		if err != nil {
+			log.Printf("Failed to parse create_auth_token.html: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		data := TemplateData{
+			AuthToken: authToken,
+		}
+
+		err = tmpl.Execute(w, data)
+		if err != nil {
+			log.Printf("Failed to execute template: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -224,42 +256,153 @@ func (s *Server) handleIndex() http.HandlerFunc {
 		}
 
 		// Check if user info is already in the cookie
-		userCookie, err := r.Cookie("userinfo")
-		if err == nil && userCookie.Value != "" {
-			decodedValue, err := url.QueryUnescape(userCookie.Value)
-			if err != nil {
-				log.Printf("Failed to URL unescape user info: %v", err)
-				http.Error(w, "Failed to retrieve user info", http.StatusInternalServerError)
-				return
-			}
-
-			var user user.User
-			err = json.Unmarshal([]byte(decodedValue), &user)
-			if err != nil {
-				log.Printf("Failed to unmarshal user info: %v", err)
-				http.Error(w, "Failed to retrieve user info", http.StatusInternalServerError)
-				return
-			}
-
-			// Retrieve auth token
-			authToken, err := s.getMaskedAuthToken(r, user.Email, encryptionKey)
-			if err != nil {
-				log.Printf("Failed to retrieve auth token: %v", err)
-				http.Error(w, "Failed to retrieve auth token", http.StatusInternalServerError)
-				return
-			}
-
+		userInfo, err := GetUserInfoFromCookie(r)
+		if err == nil {
 			data := TemplateData{
-				User:      user,
-				AuthToken: authToken,
+				User: *userInfo,
 			}
 
-			if authToken != nil {
-				s.template.Execute(w, data)
-				return
-			}
+			s.template.Execute(w, data)
 
 		}
 		s.template.Execute(w, TemplateData{})
+	}
+}
+
+// handleGetAuthTokens retrieves all auth tokens for the authenticated user.
+// @Summary Get all auth tokens
+// @Description Retrieves all auth tokens for the authenticated user.
+// @Tags auth-tokens
+// @Produce json
+// @Success 200 {array} AuthTokenData "Successfully retrieved auth tokens"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 500 {string} string "Failed to retrieve auth tokens"
+// @Router /api/auth-tokens [get]
+func (s *Server) handleGetAuthTokens() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, ok := GetUserFromContext(r)
+		if !ok {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		// Retrieve all auth tokens for the user
+		authTokens, err := s.userService.GetAllAuthTokens(r.Context(), userInfo.Email)
+		if err != nil {
+			log.Printf("Failed to retrieve auth tokens: %v", err)
+			http.Error(w, "Failed to retrieve auth tokens", http.StatusInternalServerError)
+			return
+		}
+
+		var authTokenDataList []AuthTokenData
+		for _, token := range authTokens {
+
+			authTokenDataList = append(authTokenDataList, AuthTokenData{
+				ID:          token.ID.Hex(),
+				MaskedToken: token.Token,
+				CreatedAt:   token.CreatedAt.String(),
+			})
+		}
+		json.NewEncoder(w).Encode(authTokenDataList)
+	}
+}
+
+// handleDeleteAuthToken deletes a specific auth token by ID.
+// @Summary Delete an auth token
+// @Description Deletes a specific auth token by ID.
+// @Tags auth-tokens
+// @Param id path string true "Token ID"
+// @Produce json
+// @Success 200 {object} map[string]string "Auth token deleted successfully"
+// @Failure 400 {string} string "Invalid token ID format or Token ID is required"
+// @Failure 500 {string} string "Failed to delete auth token"
+// @Router /api/auth-token/{id} [delete]
+func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, _ := GetUserFromContext(r)
+		if userInfo == nil {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract token ID from the URL path
+		tokenID := r.PathValue("id")
+		if tokenID == "" {
+			http.Error(w, "Token ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Convert token ID to ObjectID
+		objID, err := bson.ObjectIDFromHex(tokenID)
+		if err != nil {
+			http.Error(w, "Invalid token ID format", http.StatusBadRequest)
+			return
+		}
+
+		// Delete the auth token
+		err = s.userService.DeleteAuthToken(r.Context(), objID)
+		if err != nil {
+			log.Printf("Failed to delete auth token of user %s: %v", userInfo.Email, err)
+			http.Error(w, "Failed to delete auth token", http.StatusInternalServerError)
+			return
+		}
+
+		// Return success response
+		json.NewEncoder(w).Encode(map[string]string{"message": "Auth token deleted successfully"})
+	}
+}
+
+// handleAuthTokensPage serves the auth tokens page.
+// @Summary Get auth tokens page
+// @Description Serves the auth tokens page.
+// @Tags auth-tokens
+// @Produce html
+// @Success 200 {string} string "Successfully served auth tokens page"
+// @Failure 500 {string} string "Internal Server Error"
+// @Router /auth-tokens [get]
+func (s *Server) handleAuthTokensPage() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if user info is already in the cookie
+		userInfo, err := GetUserInfoFromCookie(r)
+		if err != nil {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		// Retrieve all auth tokens for the user
+		authTokens, err := s.userService.GetAllAuthTokens(r.Context(), userInfo.Email)
+		if err != nil {
+			log.Printf("Failed to retrieve auth tokens: %v", err)
+			http.Error(w, "Failed to retrieve auth tokens", http.StatusInternalServerError)
+			return
+		}
+
+		var authTokenDataList []AuthTokenData
+		for _, token := range authTokens {
+
+			authTokenDataList = append(authTokenDataList, AuthTokenData{
+				ID:          token.ID.Hex(),
+				MaskedToken: token.Token,
+				CreatedAt:   token.CreatedAt.String(),
+			})
+		}
+
+		data := TemplateData{
+			AuthTokens: authTokenDataList,
+		}
+
+		tmpl, err := template.ParseFiles("./static/auth_tokens.html")
+		if err != nil {
+			log.Printf("Failed to parse auth_tokens.html: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		tmpl.Execute(w, data)
 	}
 }

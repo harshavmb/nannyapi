@@ -25,15 +25,10 @@
             <button id="logout-button" class="btn btn-danger mt-2">
                 <i class="fas fa-sign-out-alt"></i> Logout
             </button>
-
-            {{if .AuthToken}}
-            <p>Auth Token: {{.AuthToken.Token}} created at: {{.AuthToken.CreatedAt}}</p>
-            {{else}}
-            <p>No auth tokens found. Create one now.</p>
-            {{end}}
             <form action="/create-auth-token" method="post">
                 <button type="submit" class="btn btn-success mt-2">Create Auth Token</button>
             </form>
+            <a href="/auth-tokens" class="btn btn-info mt-2">View Auth Tokens</a>
         </div>
     </div>
 

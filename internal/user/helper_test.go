@@ -11,18 +11,18 @@ func TestEncryptDecrypt(t *testing.T) {
 
 	t.Run("EncryptDecrypt", func(t *testing.T) {
 		originalText := "Hello, World!"
-		encryptedText, err := encrypt(originalText, encryptionKey)
+		encryptedText, err := Encrypt(originalText, encryptionKey)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, encryptedText)
 
-		decryptedText, err := decrypt(encryptedText, encryptionKey)
+		decryptedText, err := Decrypt(encryptedText, encryptionKey)
 		assert.NoError(t, err)
 		assert.Equal(t, originalText, decryptedText)
 	})
 
 	t.Run("InvalidKeySize", func(t *testing.T) {
 		invalidKey := "aGVsbG93b3JsZGhlbGxvd29ybGRoZWxsb3dvcmxk" // Base64 encoded 24-byte key
-		_, err := encrypt("Hello, World!", invalidKey)
+		_, err := Encrypt("Hello, World!", invalidKey)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid key size")
 	})

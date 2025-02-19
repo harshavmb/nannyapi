@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/harshavmb/nannyapi/internal/user"
@@ -121,9 +123,39 @@ func (s *Server) getMaskedAuthToken(r *http.Request, userEmail, encryptionKey st
 
 	authToken, err := s.userService.GetAuthToken(r.Context(), userEmail, encryptionKey)
 	if err != nil {
-		log.Fatalf("Failed to get auth token: %v", err)
+		if err == context.Canceled {
+			log.Printf("Failed to get auth token: context canceled")
+			return nil, nil // Return nil error and nil auth token
+		}
 		return nil, err // Return nil error as it could be that token is not created yet
 	}
 
 	return authToken, nil // Return nil error as it could be that token is not created yet
+}
+
+// GetUserInfoFromCookie retrieves user information from the "userinfo" cookie.
+func GetUserInfoFromCookie(r *http.Request) (*user.User, error) {
+	userCookie, err := r.Cookie("userinfo")
+	if err != nil {
+		return nil, fmt.Errorf("user not authenticated")
+	}
+
+	decodedValue, err := url.QueryUnescape(userCookie.Value)
+	if err != nil {
+		return nil, fmt.Errorf("failed to URL unescape user info: %v", err)
+	}
+
+	var user user.User
+	err = json.Unmarshal([]byte(decodedValue), &user)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal user info: %v", err)
+	}
+
+	return &user, nil
+}
+
+// IsSessionValid checks if the user session is valid.
+func IsSessionValid(r *http.Request) bool {
+	_, err := r.Cookie("userinfo")
+	return err == nil
 }
