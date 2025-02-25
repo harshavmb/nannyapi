@@ -23,6 +23,14 @@ func NewUserService(userRepo *UserRepository, authTokenRepo *AuthTokenRepository
 	}
 }
 
+type AgentInfoService struct {
+	repo *AgentInfoRepository
+}
+
+func NewAgentInfoService(repo *AgentInfoRepository) *AgentInfoService {
+	return &AgentInfoService{repo: repo}
+}
+
 func (s *UserService) SaveUser(ctx context.Context, userInfo map[string]interface{}) error {
 	// Check if a user with the given email already exists
 	existingUser, err := s.userRepo.FindUserByEmail(ctx, userInfo["email"].(string))
@@ -179,4 +187,21 @@ func (s *UserService) GetAuthTokenByHashedToken(ctx context.Context, hashedToken
 		return nil, fmt.Errorf("failed to retrieve auth token: %v", err)
 	}
 	return authToken, nil
+}
+
+func (s *AgentInfoService) SaveAgentInfo(ctx context.Context, agentInfo AgentInfo) (*AgentInfo, error) {
+	_, err := s.repo.InsertAgentInfo(ctx, &agentInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to save agent info: %v", err)
+	}
+	log.Println("Saved agent info:", agentInfo)
+	return nil, nil
+}
+
+func (s *AgentInfoService) GetAgentInfoByID(ctx context.Context, id string) ([]AgentInfo, error) {
+	agentsInfo, err := s.repo.GetAgentInfoByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve agent info: %v", err)
+	}
+	return agentsInfo, nil
 }

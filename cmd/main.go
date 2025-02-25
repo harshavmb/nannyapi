@@ -61,8 +61,10 @@ func main() {
 
 	// Initialize User Repository and Service
 	userRepo := user.NewUserRepository(mongoDB)
+	agentInfoRepo := user.NewAgentInfoRepository(mongoDB)
 	authTokenRepo := user.NewAuthTokenRepository(mongoDB)
 	userService := user.NewUserService(userRepo, authTokenRepo)
+	agentService := user.NewAgentInfoService(agentInfoRepo)
 
 	// Initialize GitHub OAuth
 	githubClientID := os.Getenv("GH_CLIENT_ID")
@@ -71,7 +73,7 @@ func main() {
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
 
 	// Create server with Gemini client
-	srv := server.NewServer(geminiClient, githubAuth, userService)
+	srv := server.NewServer(geminiClient, githubAuth, userService, agentService)
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{

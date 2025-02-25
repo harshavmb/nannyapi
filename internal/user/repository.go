@@ -31,6 +31,21 @@ func NewAuthTokenRepository(db *mongo.Database) *AuthTokenRepository {
 	}
 }
 
+type AgentInfoRepository struct {
+	collection *mongo.Collection
+}
+
+func NewAgentInfoRepository(db *mongo.Database) *AgentInfoRepository {
+	return &AgentInfoRepository{
+		collection: db.Collection("agent_info"),
+	}
+}
+
+func (r *AgentInfoRepository) InsertAgentInfo(ctx context.Context, agentInfo *AgentInfo) (*mongo.InsertOneResult, error) {
+	agentInfo.CreatedAt = time.Now()
+	return r.collection.InsertOne(ctx, agentInfo)
+}
+
 func (r *UserRepository) UpsertUser(ctx context.Context, user *User) (*mongo.UpdateResult, error) {
 	if user.ID.IsZero() {
 		user.ID = bson.NewObjectID()
@@ -192,4 +207,23 @@ func (r *AuthTokenRepository) GetAuthTokenByHashedToken(ctx context.Context, has
 		return nil, fmt.Errorf("failed to retrieve auth token: %v", err)
 	}
 	return &authToken, nil
+}
+
+func (r *AgentInfoRepository) GetAgentInfoByID(ctx context.Context, id string) ([]AgentInfo, error) {
+	filter := bson.M{"_id": id}
+	cursor, err := r.collection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var agentInfos []AgentInfo
+	for cursor.Next(ctx) {
+		var agentInfo AgentInfo
+		if err := cursor.Decode(&agentInfo); err != nil {
+			return nil, err
+		}
+		agentInfos = append(agentInfos, agentInfo)
+	}
+	return agentInfos, nil
 }

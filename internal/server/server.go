@@ -19,11 +19,12 @@ import (
 
 // Server represents the HTTP server
 type Server struct {
-	mux          *http.ServeMux
-	geminiClient *api.GeminiClient
-	githubAuth   *auth.GitHubAuth
-	template     *template.Template
-	userService  *user.UserService
+	mux              *http.ServeMux
+	geminiClient     *api.GeminiClient
+	githubAuth       *auth.GitHubAuth
+	template         *template.Template
+	userService      *user.UserService
+	agentInfoService *user.AgentInfoService
 }
 
 // TemplateData struct
@@ -48,14 +49,14 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 }
 
 // NewServer creates a new Server instance
-func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService) *Server {
+func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *user.AgentInfoService) *Server {
 	mux := http.NewServeMux()
 	templatePath := os.Getenv("NANNY_TEMPLATE_PATH")
 	if templatePath == "" {
 		templatePath = "./static/index.html" // Default template path
 	}
 	tmpl := template.Must(template.ParseFiles(templatePath))
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userService: userService}
+	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userService: userService, agentInfoService: agentInfoService}
 	server.routes()
 	return server
 }
@@ -80,13 +81,52 @@ func (s *Server) routes() {
 	// API endoints with token authentication
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("/api/auth-tokens", s.handleGetAuthTokens())
+	apiMux.Handle("/api/user-auth-token", s.handleFetchUserInfoFromToken())
 	apiMux.Handle("DELETE /api/auth-token/{id}", s.handleDeleteAuthToken())
+	apiMux.HandleFunc("POST /api/agent-info", s.handleAgentInfo())
+	apiMux.HandleFunc("/api/agent-info/{id}", s.handleGetAgentInfo())
 
 	s.mux.Handle("/api/", s.AuthMiddleware(apiMux))
 
 	// Serve static files from the "static" directory
 	fs := http.FileServer(http.Dir("./static"))
 	s.mux.Handle("/static/", http.StripPrefix("/static/", fs))
+}
+
+// handleFetchUserInfoFromToken handles the fetching of user info from the auth token
+// the request with the following format:
+// Sends a JSOn payload containing the user info to the client with the following format.
+// Response:
+//   - email: string
+//   - name: string
+//   - avatar: string
+//
+// handleFetchUserInfoFromToken godoc
+//
+//	@Summary		Fetch user info from auth token
+//	@Description	Fetch user info from auth token
+//	@Tags			auth-tokens
+//	@Produce		json
+//	@Success		200		{object}	[]string
+//	@Failure		400		{string}    "Bad Request"
+//	@Failure		404		{string}    "Not Found"
+//	@Failure		500		{string}    "Internal Server Error"
+//	@Router			/user-auth-token [get]
+func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, ok := GetUserFromContext(r)
+		if !ok {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		log.Printf("User info found in context: %s", userInfo.Email)
+
+		json.NewEncoder(w).Encode(userInfo)
+	}
 }
 
 // chatHandler returns the complete response of the model to the client. Expects a JSON payload in
@@ -404,5 +444,75 @@ func (s *Server) handleAuthTokensPage() http.HandlerFunc {
 			return
 		}
 		tmpl.Execute(w, data)
+	}
+}
+
+// handleAgentInfo handles the ingestion of agent information
+func (s *Server) handleAgentInfo() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, _ := GetUserFromContext(r)
+		if userInfo == nil {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		var agentInfo user.AgentInfo
+		if err := json.NewDecoder(r.Body).Decode(&agentInfo); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		// Validate required fields
+		if agentInfo.Hostname == "" || agentInfo.IPAddress == "" || agentInfo.KernelVersion == "" {
+			http.Error(w, "All fields (hostname, ip_address, kernel_version) are required", http.StatusBadRequest)
+			return
+		}
+
+		agentInfo.Email = userInfo.Email
+
+		_, err := s.agentInfoService.SaveAgentInfo(r.Context(), agentInfo)
+		if err != nil {
+			http.Error(w, "Failed to save agent info", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Agent info saved successfully"})
+	}
+}
+
+// handleGetAgentInfo retrieves agent information by id
+func (s *Server) handleGetAgentInfo() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			http.Error(w, "ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Convert the ID to an ObjectID
+		objectID, err := bson.ObjectIDFromHex(id)
+		if err != nil {
+			http.Error(w, "Invalid ID format", http.StatusBadRequest)
+			return
+		}
+
+		agentInfos, err := s.agentInfoService.GetAgentInfoByID(r.Context(), objectID.String())
+		if err != nil {
+			http.Error(w, "Failed to retrieve agent info", http.StatusInternalServerError)
+			return
+		}
+
+		if agentInfos == nil {
+			http.Error(w, "Agent info not found", http.StatusNotFound)
+			return
+		}
+
+		json.NewEncoder(w).Encode(agentInfos)
 	}
 }
