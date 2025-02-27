@@ -46,8 +46,9 @@ func TestChatRepository(t *testing.T) {
 	repo := NewChatRepository(client.Database(testDBName))
 
 	t.Run("InsertChat", func(t *testing.T) {
+		agentId := bson.NewObjectID().Hex()
 		chat := &Chat{
-			AgentID: bson.NewObjectID().Hex(),
+			AgentID: agentId,
 			History: []PromptResponse{},
 		}
 
@@ -60,7 +61,7 @@ func TestChatRepository(t *testing.T) {
 		insertedChat, err := repo.GetChatByID(context.Background(), result.InsertedID.(bson.ObjectID))
 		assert.NoError(t, err)
 		assert.NotNil(t, insertedChat)
-		assert.Equal(t, "agent1", insertedChat.AgentID)
+		assert.Equal(t, agentId, insertedChat.AgentID)
 	})
 
 	t.Run("UpdateChat", func(t *testing.T) {
@@ -94,8 +95,9 @@ func TestChatRepository(t *testing.T) {
 
 	t.Run("GetChatByID", func(t *testing.T) {
 		// Insert a chat
+		agentId := bson.NewObjectID().Hex()
 		chat := &Chat{
-			AgentID: bson.NewObjectID().Hex(),
+			AgentID: agentId,
 			History: []PromptResponse{},
 		}
 		insertResult, err := repo.InsertChat(context.Background(), chat)
@@ -108,7 +110,7 @@ func TestChatRepository(t *testing.T) {
 		foundChat, err := repo.GetChatByID(context.Background(), chatID)
 		assert.NoError(t, err)
 		assert.NotNil(t, foundChat)
-		assert.Equal(t, "agent3", foundChat.AgentID)
+		assert.Equal(t, agentId, foundChat.AgentID)
 	})
 
 	t.Run("ChatNotFoundByID", func(t *testing.T) {
