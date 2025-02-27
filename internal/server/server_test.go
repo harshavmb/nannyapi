@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -12,9 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
+	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
+	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -65,14 +70,16 @@ func setupServer(t *testing.T) (*Server, func(), string) {
 	// Create a new User Repository
 	userRepository := user.NewUserRepository(client.Database(testDBName))
 	authTokenRepository := user.NewAuthTokenRepository(client.Database(testDBName))
-	agentInfoRepository := user.NewAgentInfoRepository(client.Database(testDBName))
+	agentInfoRepository := agent.NewAgentInfoRepository(client.Database(testDBName))
+	ChatRepository := chat.NewChatRepository(client.Database(testDBName))
 
 	// Mock User Service
 	mockUserService := user.NewUserService(userRepository, authTokenRepository)
-	agentInfoservice := user.NewAgentInfoService(agentInfoRepository)
+	agentInfoservice := agent.NewAgentInfoService(agentInfoRepository)
+	chatService := chat.NewChatService(ChatRepository, agentInfoservice)
 
 	// Create a new server instance
-	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice)
+	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService)
 
 	// Create a valid auth token for the test user
 	testUser := &user.User{
@@ -107,6 +114,17 @@ func setupServer(t *testing.T) (*Server, func(), string) {
 	}
 
 	return server, cleanup, decryptedToken
+}
+
+func generateHistory(prompts, responses []string) []chat.PromptResponse {
+	history := make([]chat.PromptResponse, len(prompts))
+	for i := range prompts {
+		history[i] = chat.PromptResponse{
+			Prompt:   prompts[i],
+			Response: responses[i],
+		}
+	}
+	return history
 }
 
 func TestHandleStatus(t *testing.T) {
@@ -357,7 +375,7 @@ func TestHandleAgentInfo(t *testing.T) {
 
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Create a test request with valid agent info
-		agentInfo := `{"hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"}`
+		agentInfo := `{"hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0","os_version":"Ubuntu 24.04"}`
 		req, err := http.NewRequest("POST", "/api/agent-info", strings.NewReader(agentInfo))
 		if err != nil {
 			t.Fatalf("Could not create request: %v", err)
@@ -442,11 +460,12 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Insert test agent info into the database
-		agentInfo := &user.AgentInfo{
+		agentInfo := &agent.AgentInfo{
 			Email:         "test@example.com",
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
 		}
 		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
 		if err != nil {
@@ -454,10 +473,10 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Fetch the inserted ID
-		agentInfoID := insertResult.ID.Hex()
+		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
 
 		// Create a test request to retrieve agent info by ID
-		req, err := http.NewRequest("GET", fmt.Sprintf("/api/agent-info?id=%s", agentInfoID), nil)
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/agent-info/%s", agentInfoID), nil)
 		if err != nil {
 			t.Fatalf("Could not create request: %v", err)
 		}
@@ -477,7 +496,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Check the response body
-		expected := fmt.Sprintf(`[{"_id":"%s","email":"test@example.com","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0","created_at":"`, agentInfoID) // Partial match
+		expected := fmt.Sprintf(`{"id":"%s","email":"test@example.com","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID) // Partial match
 		actual := strings.TrimSpace(recorder.Body.String())
 		if !strings.Contains(actual, expected) {
 			t.Errorf("Expected body to contain %q, but got %q", expected, actual)
@@ -486,7 +505,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 
 	t.Run("IDNotProvided", func(t *testing.T) {
 		// Create a test request without ID
-		req, err := http.NewRequest("GET", "/api/agent-info", nil)
+		req, err := http.NewRequest("GET", "/api/agent-info/", nil)
 		if err != nil {
 			t.Fatalf("Could not create request: %v", err)
 		}
@@ -506,10 +525,223 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Check the response body
-		expected := "ID is required\n"
+		expected := "Agent ID is required"
 		actual := strings.TrimSpace(recorder.Body.String())
 		if actual != expected {
 			t.Errorf("Expected body %q, but got %q", expected, actual)
 		}
+	})
+}
+
+func TestHandleStartChat(t *testing.T) {
+	server, cleanup, validToken := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// Insert test agent info into the database
+		agentInfo := &agent.AgentInfo{
+			Email:         "test@example.com",
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		if err != nil {
+			t.Fatalf("Failed to save agent info: %v", err)
+		}
+
+		// Fetch the inserted ID
+		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
+
+		chat := fmt.Sprintf(`{"agent_id":"%s"}`, agentInfoID)
+		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusCreated, recorder.Code)
+
+		// Check the response body
+		expected := "{\"message\":\"Chat saved successfully\"}"
+		actual := strings.TrimSpace(recorder.Body.String())
+		if actual != expected {
+			t.Errorf("Expected body %q, but got %q", expected, actual)
+		}
+	})
+
+	t.Run("InvalidAgentID", func(t *testing.T) {
+		chat := fmt.Sprintf(`{"agent_id":"%s"}`, "agent1")
+		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+
+		// Check the response body
+		expected := "Invalid agent_id passed"
+		actual := strings.TrimSpace(recorder.Body.String())
+		if !strings.Contains(actual, expected) { // partial match
+			t.Errorf("Expected body %q, but got %q", expected, actual)
+		}
+	})
+
+	t.Run("NonExistentAgent", func(t *testing.T) {
+		chat := fmt.Sprintf(`{"agent_id":"%s"}`, bson.NewObjectID().Hex())
+		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+
+		// Check the response body
+		expected := "agent_id doesn't exist"
+		actual := strings.TrimSpace(recorder.Body.String())
+		if !strings.Contains(actual, expected) { // partial match
+			t.Errorf("Expected body %q, but got %q", expected, actual)
+		}
+	})
+
+	t.Run("InvalidRequestPayload", func(t *testing.T) {
+		requestBody := `{"invalid_field":"value"}`
+		req, err := http.NewRequest("POST", "/api/chat", bytes.NewBufferString(requestBody))
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	})
+}
+
+func TestChatService_AddPromptResponse(t *testing.T) {
+	server, cleanup, validToken := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// Insert test agent info into the database
+		agentInfo := &agent.AgentInfo{
+			Email:         "test@example.com",
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		if err != nil {
+			t.Fatalf("Failed to save agent info: %v", err)
+		}
+
+		// Fetch the inserted ID
+		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
+
+		// Insert a chat to update
+		initialChat := &chat.Chat{
+			AgentID: agentInfoID,
+			History: generateHistory(
+				[]string{"Initial prompt"},
+				[]string{"Initial response"},
+			),
+		}
+		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
+		assert.NoError(t, err)
+
+		chatID := intialChatResult.InsertedID.(bson.ObjectID).Hex()
+
+		// Update the chat with a new prompt-response pair
+		reqBody := `{"prompt":"Hello","response":"Hi there!"}`
+		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		var updatedChat chat.Chat
+		err = json.NewDecoder(recorder.Body).Decode(&updatedChat)
+		assert.NoError(t, err)
+		assert.Len(t, updatedChat.History, 2)
+		assert.Equal(t, "Initial prompt", updatedChat.History[0].Prompt)
+		assert.Equal(t, "Initial response", updatedChat.History[0].Response)
+		assert.Equal(t, "Hello", updatedChat.History[1].Prompt)
+		assert.Equal(t, "Hi there!", updatedChat.History[1].Response)
+	})
+}
+
+func TestChatService_GetChatByID(t *testing.T) {
+	server, cleanup, validToken := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// Insert test agent info into the database
+		agentInfo := &agent.AgentInfo{
+			Email:         "test@example.com",
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		if err != nil {
+			t.Fatalf("Failed to save agent info: %v", err)
+		}
+
+		// Fetch the inserted ID
+		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
+
+		// Insert a chat to update
+		initialChat := &chat.Chat{
+			AgentID: agentInfoID,
+			History: generateHistory(
+				[]string{"Initial prompt"},
+				[]string{"Initial response"},
+			),
+		}
+		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
+		assert.NoError(t, err)
+
+		chatID := intialChatResult.InsertedID.(bson.ObjectID).Hex()
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/chat/%s", chatID), nil)
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		var chat chat.Chat
+		err = json.NewDecoder(recorder.Body).Decode(&chat)
+		assert.NoError(t, err)
+		assert.NotNil(t, chat)
+		assert.Equal(t, agentInfoID, chat.AgentID)
+		assert.Equal(t, chatID, chat.ID.Hex())
 	})
 }

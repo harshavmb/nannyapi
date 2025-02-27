@@ -1,4 +1,21 @@
 definitions:
+  agent.AgentInfo:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      hostname:
+        type: string
+      id:
+        type: string
+      ip_address:
+        type: string
+      kernel_version:
+        type: string
+      os_version:
+        type: string
+    type: object
   server.AuthTokenData:
     properties:
       createdAt:
@@ -40,6 +57,77 @@ info:
     name: GNU General Public License v3.0
     url: https://www.gnu.org/licenses/gpl-3.0.html
 paths:
+  /api/agent-info:
+    post:
+      consumes:
+      - application/json
+      description: Ingest agent information
+      parameters:
+      - description: Agent Information
+        in: body
+        name: agentInfo
+        required: true
+        schema:
+          $ref: '#/definitions/agent.AgentInfo'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Agent info saved successfully
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            type: string
+        "401":
+          description: User not authenticated
+          schema:
+            type: string
+        "500":
+          description: Failed to save agent info
+          schema:
+            type: string
+      summary: Ingest agent information
+      tags:
+      - agent-info
+  /api/agent-info/{id}:
+    get:
+      description: Retrieves agent information by ID
+      parameters:
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Successfully retrieved agent info
+          schema:
+            $ref: '#/definitions/agent.AgentInfo'
+        "400":
+          description: Invalid ID format
+          schema:
+            type: string
+        "401":
+          description: User not authenticated
+          schema:
+            type: string
+        "404":
+          description: Agent info not found
+          schema:
+            type: string
+        "500":
+          description: Failed to retrieve agent info
+          schema:
+            type: string
+      summary: Get agent info by ID
+      tags:
+      - agent-info
   /api/auth-token/{id}:
     delete:
       description: Deletes a specific auth token by ID.
@@ -170,4 +258,31 @@ paths:
       summary: Status of the API
       tags:
       - status
+  /user-auth-token:
+    get:
+      description: Fetch user info from auth token
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      summary: Fetch user info from auth token
+      tags:
+      - auth-tokens
 swagger: "2.0"
