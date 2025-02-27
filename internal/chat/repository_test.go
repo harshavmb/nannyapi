@@ -116,8 +116,8 @@ func TestChatRepository(t *testing.T) {
 	t.Run("ChatNotFoundByID", func(t *testing.T) {
 		// Try to find chat by non-existent ID
 		nonExistentID := bson.NewObjectID()
-		chat, err := repo.GetChatByID(context.Background(), nonExistentID)
-		assert.NoError(t, err)
+		chat, _ := repo.GetChatByID(context.Background(), nonExistentID)
+		assert.Error(t, mongo.ErrNoDocuments)
 		assert.Nil(t, chat)
 	})
 }

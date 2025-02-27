@@ -505,7 +505,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 
 	t.Run("IDNotProvided", func(t *testing.T) {
 		// Create a test request without ID
-		req, err := http.NewRequest("GET", "/api/agent-info/", nil)
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/agent-info/%s", ""), nil)
 		if err != nil {
 			t.Fatalf("Could not create request: %v", err)
 		}
@@ -691,6 +691,65 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		assert.Equal(t, "Hello", updatedChat.History[1].Prompt)
 		assert.Equal(t, "Hi there!", updatedChat.History[1].Response)
 	})
+
+	t.Run("InValidRequestPayload", func(t *testing.T) {
+		// Insert test agent info into the database
+		agentInfo := &agent.AgentInfo{
+			Email:         "test@example.com",
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		if err != nil {
+			t.Fatalf("Failed to save agent info: %v", err)
+		}
+
+		// Fetch the inserted ID
+		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
+
+		// Insert a chat to update
+		initialChat := &chat.Chat{
+			AgentID: agentInfoID,
+			History: generateHistory(
+				[]string{"Initial prompt"},
+				[]string{"Initial response"},
+			),
+		}
+		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
+		assert.NoError(t, err)
+
+		chatID := intialChatResult.InsertedID.(bson.ObjectID).Hex()
+
+		// Update the chat with a new prompt-response pair
+		reqBody := `{"response":"Hi there!"}`
+		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	})
+
+	t.Run("NonExistentChat", func(t *testing.T) {
+		// Update the chat with a new prompt-response pair
+		reqBody := `{"prompt":"Hello","response":"Hi there!"}`
+		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", bson.NewObjectID().Hex()), strings.NewReader(reqBody))
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+	})
 }
 
 func TestChatService_GetChatByID(t *testing.T) {
@@ -743,5 +802,59 @@ func TestChatService_GetChatByID(t *testing.T) {
 		assert.NotNil(t, chat)
 		assert.Equal(t, agentInfoID, chat.AgentID)
 		assert.Equal(t, chatID, chat.ID.Hex())
+	})
+
+	t.Run("NonExistentChat", func(t *testing.T) {
+		// Insert test agent info into the database
+		agentInfo := &agent.AgentInfo{
+			Email:         "test@example.com",
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		if err != nil {
+			t.Fatalf("Failed to save agent info: %v", err)
+		}
+
+		// Fetch the inserted ID
+		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
+
+		// Insert a chat to update
+		initialChat := &chat.Chat{
+			AgentID: agentInfoID,
+			History: generateHistory(
+				[]string{"Initial prompt"},
+				[]string{"Initial response"},
+			),
+		}
+		_, err = server.chatService.StartChat(context.Background(), initialChat)
+		assert.NoError(t, err)
+
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/chat/%s", bson.NewObjectID().Hex()), nil)
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+	})
+
+	t.Run("NoIDPassed", func(t *testing.T) {
+
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/chat/%s", ""), nil)
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	})
 }

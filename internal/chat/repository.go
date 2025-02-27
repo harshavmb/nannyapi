@@ -37,7 +37,7 @@ func (r *ChatRepository) GetChatByID(ctx context.Context, chatID bson.ObjectID) 
 	err := r.collection.FindOne(ctx, filter).Decode(&chat)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, nil // No chat found
+			return nil, mongo.ErrNoDocuments // No chat found
 		}
 		return nil, err
 	}

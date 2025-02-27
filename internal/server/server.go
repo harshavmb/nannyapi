@@ -92,6 +92,7 @@ func (s *Server) routes() {
 	apiMux.HandleFunc("GET /api/agent-info/{id}", s.handleGetAgentInfoByID())
 	apiMux.HandleFunc("POST /api/chat", s.handleStartChat())
 	apiMux.HandleFunc("PUT /api/chat/{id}", s.handleAddPromptResponse())
+	apiMux.HandleFunc("GET /api/chat/", s.handleGetChatByID())
 	apiMux.HandleFunc("GET /api/chat/{id}", s.handleGetChatByID())
 
 	s.mux.Handle("/api/", s.AuthMiddleware(apiMux))
@@ -532,6 +533,7 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 			http.Error(w, "Agent ID is required", http.StatusBadRequest)
 			return
 		}
+		fmt.Println("ID: ", id)
 
 		// Convert the ID to an ObjectID
 		objectID, err := bson.ObjectIDFromHex(id)
@@ -542,12 +544,11 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 
 		agentInfo, err := s.agentInfoService.GetAgentInfoByID(r.Context(), objectID)
 		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				http.Error(w, "Agent info not found", http.StatusNotFound)
+				return
+			}
 			http.Error(w, "Failed to retrieve agent info", http.StatusInternalServerError)
-			return
-		}
-
-		if agentInfo == nil {
-			http.Error(w, "Agent info not found", http.StatusNotFound)
 			return
 		}
 
@@ -648,6 +649,11 @@ func (s *Server) handleAddPromptResponse() http.HandlerFunc {
 			return
 		}
 
+		if promptResponse.Prompt == "" {
+			http.Error(w, "Prompt is required", http.StatusBadRequest)
+			return
+		}
+
 		chat, err := s.chatService.AddPromptResponse(r.Context(), chatID, promptResponse.Prompt, promptResponse.Response)
 		if err != nil {
 			if err == mongo.ErrNoDocuments {
@@ -684,7 +690,13 @@ func (s *Server) handleGetChatByID() http.HandlerFunc {
 			return
 		}
 
+		// Extract the ID from the URL path
 		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "Chat ID is required", http.StatusBadRequest)
+			return
+		}
+
 		chatID, err := bson.ObjectIDFromHex(id)
 		if err != nil {
 			http.Error(w, "Invalid chat ID format", http.StatusBadRequest)
