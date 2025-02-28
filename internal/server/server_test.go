@@ -397,10 +397,19 @@ func TestHandleAgentInfo(t *testing.T) {
 		}
 
 		// Check the response body
-		expected := `{"message":"Agent info saved successfully"}`
-		actual := strings.TrimSpace(recorder.Body.String())
-		if actual != expected {
-			t.Errorf("Expected body %q, but got %q", expected, actual)
+		var response map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&response)
+		if err != nil {
+			t.Fatalf("Could not decode response body: %v", err)
+		}
+
+		id, ok := response["id"]
+		if !ok {
+			t.Errorf("Expected response to contain 'id' field")
+		}
+
+		if _, err := bson.ObjectIDFromHex(id); err != nil {
+			t.Errorf("Expected 'id' field to be a valid ObjectID, but got %v", id)
 		}
 	})
 
@@ -569,10 +578,19 @@ func TestHandleStartChat(t *testing.T) {
 		assert.Equal(t, http.StatusCreated, recorder.Code)
 
 		// Check the response body
-		expected := "{\"message\":\"Chat saved successfully\"}"
-		actual := strings.TrimSpace(recorder.Body.String())
-		if actual != expected {
-			t.Errorf("Expected body %q, but got %q", expected, actual)
+		var response map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&response)
+		if err != nil {
+			t.Fatalf("Could not decode response body: %v", err)
+		}
+
+		id, ok := response["id"]
+		if !ok {
+			t.Errorf("Expected response to contain 'id' field")
+		}
+
+		if _, err := bson.ObjectIDFromHex(id); err != nil {
+			t.Errorf("Expected 'id' field to be a valid ObjectID, but got %v", id)
 		}
 	})
 

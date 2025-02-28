@@ -463,7 +463,7 @@ func (s *Server) handleAuthTokensPage() http.HandlerFunc {
 // @Accept json
 // @Produce json
 // @Param agentInfo body agent.AgentInfo true "Agent Information"
-// @Success 201 {object} map[string]string "Agent info saved successfully"
+// @Success 201 {object} map[string]string "id of the inserted agent info"
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to save agent info"
@@ -493,14 +493,19 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 
 		agentInfo.Email = userInfo.Email
 
-		_, err := s.agentInfoService.SaveAgentInfo(r.Context(), agentInfo)
+		insertOneResult, err := s.agentInfoService.SaveAgentInfo(r.Context(), agentInfo)
 		if err != nil {
 			http.Error(w, "Failed to save agent info", http.StatusInternalServerError)
 			return
 		}
 
+		// Return the inserted ID in the response
+		response := map[string]string{
+			"id": insertOneResult.InsertedID.(bson.ObjectID).Hex(),
+		}
+
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"message": "Agent info saved successfully"})
+		json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -607,8 +612,12 @@ func (s *Server) handleStartChat() http.HandlerFunc {
 			return
 		}
 
+		// Return the inserted ID in the response
+		response := map[string]string{
+			"id": insertResult.InsertedID.(bson.ObjectID).Hex(),
+		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"message": "Chat saved successfully"})
+		json.NewEncoder(w).Encode(response)
 	}
 }
 
