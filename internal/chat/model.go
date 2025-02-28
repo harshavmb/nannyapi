@@ -18,4 +18,10 @@ type Chat struct {
 type PromptResponse struct {
 	Prompt   string `json:"prompt" bson:"prompt"`
 	Response string `json:"response" bson:"response"`
+	Type     string `json:"type" bson:"type"` // "commands" or "text"
+}
+
+type AllowedCommand struct {
+	Command string
+	Args    []string
 }

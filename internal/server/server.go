@@ -649,12 +649,12 @@ func (s *Server) handleAddPromptResponse() http.HandlerFunc {
 			return
 		}
 
-		if promptResponse.Prompt == "" {
-			http.Error(w, "Prompt is required", http.StatusBadRequest)
+		if promptResponse.Prompt == "" || promptResponse.Type == "" {
+			http.Error(w, "Prompt and Type are required", http.StatusBadRequest)
 			return
 		}
 
-		chat, err := s.chatService.AddPromptResponse(r.Context(), chatID, promptResponse.Prompt, promptResponse.Response)
+		chat, err := s.chatService.AddPromptResponse(r.Context(), chatID, promptResponse)
 		if err != nil {
 			if err == mongo.ErrNoDocuments {
 				http.Error(w, "Chat session not found", http.StatusNotFound)

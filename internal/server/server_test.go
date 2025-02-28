@@ -116,12 +116,13 @@ func setupServer(t *testing.T) (*Server, func(), string) {
 	return server, cleanup, decryptedToken
 }
 
-func generateHistory(prompts, responses []string) []chat.PromptResponse {
+func generateHistory(prompts, responses, types []string) []chat.PromptResponse {
 	history := make([]chat.PromptResponse, len(prompts))
 	for i := range prompts {
 		history[i] = chat.PromptResponse{
 			Prompt:   prompts[i],
 			Response: responses[i],
+			Type:     types[i],
 		}
 	}
 	return history
@@ -639,7 +640,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 	server, cleanup, validToken := setupServer(t)
 	defer cleanup()
 
-	t.Run("ValidRequest", func(t *testing.T) {
+	t.Run("ValidRequestText", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
 			Email:         "test@example.com",
@@ -662,6 +663,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 			History: generateHistory(
 				[]string{"Initial prompt"},
 				[]string{"Initial response"},
+				[]string{"text"},
 			),
 		}
 		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
@@ -670,7 +672,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		chatID := intialChatResult.InsertedID.(bson.ObjectID).Hex()
 
 		// Update the chat with a new prompt-response pair
-		reqBody := `{"prompt":"Hello","response":"Hi there!"}`
+		reqBody := `{"prompt":"Hello","response":"Hi there!","type":"text"}`
 		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
 		assert.NoError(t, err)
 
@@ -690,6 +692,62 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		assert.Equal(t, "Initial response", updatedChat.History[0].Response)
 		assert.Equal(t, "Hello", updatedChat.History[1].Prompt)
 		assert.Equal(t, "Hi there!", updatedChat.History[1].Response)
+		assert.Equal(t, "text", updatedChat.History[1].Type)
+	})
+
+	t.Run("ValidRequestCommand", func(t *testing.T) {
+		// Insert test agent info into the database
+		agentInfo := &agent.AgentInfo{
+			Email:         "test@example.com",
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		if err != nil {
+			t.Fatalf("Failed to save agent info: %v", err)
+		}
+
+		// Fetch the inserted ID
+		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
+
+		// Insert a chat to update
+		initialChat := &chat.Chat{
+			AgentID: agentInfoID,
+			History: generateHistory(
+				[]string{"perform health checks"},
+				[]string{""},
+				[]string{"commands"},
+			),
+		}
+		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
+		assert.NoError(t, err)
+
+		chatID := intialChatResult.InsertedID.(bson.ObjectID).Hex()
+
+		// Update the chat with a new prompt-response pair
+		reqBody := `{"prompt":"11:42:27 up 36 days,  2:48,  3 users,  load average: 0.02, 0.03, 0.00","response":"","type":"text"}`
+		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		var updatedChat chat.Chat
+		err = json.NewDecoder(recorder.Body).Decode(&updatedChat)
+		assert.NoError(t, err)
+		assert.Len(t, updatedChat.History, 2)
+		assert.Equal(t, "perform health checks", updatedChat.History[0].Prompt)
+		assert.Contains(t, updatedChat.History[0].Response, "uptime") // partial match to check uptime is in response
+		assert.Equal(t, "commands", updatedChat.History[0].Type)
+		assert.Contains(t, updatedChat.History[1].Prompt, "load average") // partial match to check load average is in prompt
+		assert.Equal(t, "text", updatedChat.History[1].Type)
 	})
 
 	t.Run("InValidRequestPayload", func(t *testing.T) {
@@ -715,6 +773,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 			History: generateHistory(
 				[]string{"Initial prompt"},
 				[]string{"Initial response"},
+				[]string{"text"},
 			),
 		}
 		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
@@ -738,7 +797,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 
 	t.Run("NonExistentChat", func(t *testing.T) {
 		// Update the chat with a new prompt-response pair
-		reqBody := `{"prompt":"Hello","response":"Hi there!"}`
+		reqBody := `{"prompt":"Hello","response":"Hi there!","type":"text"}`
 		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", bson.NewObjectID().Hex()), strings.NewReader(reqBody))
 		assert.NoError(t, err)
 
@@ -779,6 +838,7 @@ func TestChatService_GetChatByID(t *testing.T) {
 			History: generateHistory(
 				[]string{"Initial prompt"},
 				[]string{"Initial response"},
+				[]string{"text"},
 			),
 		}
 		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
@@ -827,6 +887,7 @@ func TestChatService_GetChatByID(t *testing.T) {
 			History: generateHistory(
 				[]string{"Initial prompt"},
 				[]string{"Initial response"},
+				[]string{"text"},
 			),
 		}
 		_, err = server.chatService.StartChat(context.Background(), initialChat)

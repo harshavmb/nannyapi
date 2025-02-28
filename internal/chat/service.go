@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -35,6 +36,13 @@ func (s *ChatService) StartChat(ctx context.Context, chat *Chat) (*mongo.InsertO
 		return nil, nil
 	}
 
+	// If the chat has history, process the response
+	if chat.History != nil || len(chat.History) > 0 {
+		if err := s.processPromptResponse(&chat.History[0]); err != nil {
+			return nil, err
+		}
+	}
+
 	insertInfo, err := s.repo.InsertChat(ctx, chat)
 	if err != nil {
 		return nil, err
@@ -43,10 +51,10 @@ func (s *ChatService) StartChat(ctx context.Context, chat *Chat) (*mongo.InsertO
 	return insertInfo, nil
 }
 
-func (s *ChatService) AddPromptResponse(ctx context.Context, chatID bson.ObjectID, prompt, response string) (*Chat, error) {
-	promptResponse := PromptResponse{
-		Prompt:   prompt,
-		Response: response,
+func (s *ChatService) AddPromptResponse(ctx context.Context, chatID bson.ObjectID, promptResponse PromptResponse) (*Chat, error) {
+	// Process the response
+	if err := s.processPromptResponse(&promptResponse); err != nil {
+		return nil, err
 	}
 	_, err := s.repo.UpdateChat(ctx, chatID, promptResponse)
 	if err != nil {
@@ -57,4 +65,19 @@ func (s *ChatService) AddPromptResponse(ctx context.Context, chatID bson.ObjectI
 
 func (s *ChatService) GetChatByID(ctx context.Context, chatID bson.ObjectID) (*Chat, error) {
 	return s.repo.GetChatByID(ctx, chatID)
+}
+
+func (s *ChatService) processPromptResponse(promptResponse *PromptResponse) error {
+	switch promptResponse.Type {
+	case "commands":
+		// Send commands to the agent and receive outputs
+		commands := SendHealthCheckCommands()
+		promptResponse.Response = strings.Join(commands, "\n")
+	case "text":
+		// Process the text response
+		// (This is a placeholder for the actual implementation)
+	default:
+		return fmt.Errorf("invalid response type: %s", promptResponse.Type)
+	}
+	return nil
 }
