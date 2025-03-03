@@ -44,9 +44,8 @@ jobs:
     
     - name: Deploy binary and static files
       run: |
-        mv /home/ubuntu/actions-runner/_work/nannyapi/nannyapi /home/pi/nannyapi
-        mv /home/ubuntu/actions-runner/_work/nannyapi/static /home/pi/static        
+        mv /home/ubuntu/actions-runner/_work/nannyapi/nannyapi/nannyapi /opt/nannyapi-workdir/
 
-    #- name: Deploy binary
-    #  run: |
-    #    sudo systemctl restart nannyapi.service
+    - name: Restart nannyapi service
+      run: |
+        sudo systemctl restart nannyapi.service
