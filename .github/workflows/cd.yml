@@ -24,7 +24,7 @@ jobs:
         GOARCH=arm64 go build -o nannyapi ./cmd/main.go
 
     - name: Upload binary
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       with:
         name: nannyapi
         path: nannyapi
@@ -35,7 +35,7 @@ jobs:
 
     steps:
     - name: Download binary
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v3
       with:
         name: nannyapi
         path: /home/ubuntu/actions-runner/_work/nannyapi
