@@ -44,6 +44,7 @@ jobs:
     
     - name: Deploy binary and static files
       run: |
+        rm -rf /opt/nannyapi-workdir/*
         mv /home/ubuntu/actions-runner/_work/nannyapi/nannyapi/nannyapi /opt/nannyapi-workdir/
 
     - name: Restart nannyapi service
