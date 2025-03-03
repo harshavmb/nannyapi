@@ -73,7 +73,11 @@ func main() {
 	// Initialize GitHub OAuth
 	githubClientID := os.Getenv("GH_CLIENT_ID")
 	githubClientSecret := os.Getenv("GH_CLIENT_SECRET")
-	githubRedirectURL := "http://localhost:8080/github/callback"
+	// Get the GitHub redirect URL from the environment variable
+	githubRedirectURL := os.Getenv("GH_REDIRECT_URL")
+	if githubRedirectURL == "" {
+		githubRedirectURL = "http://localhost:8080/github/callback"
+	}
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
 
 	// Create server with Gemini client

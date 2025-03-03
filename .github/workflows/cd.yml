@@ -23,10 +23,12 @@ jobs:
         GOARCH=arm64 go build -o nannyapi ./cmd/main.go
 
     - name: Upload binary
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: nannyapi
-        path: nannyapi
+        path: |
+          nannyapi
+          static/
   
   deploy:
     runs-on: [self-hosted, linux, ARM64]
@@ -34,11 +36,20 @@ jobs:
 
     steps:
     - name: Download binary
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: nannyapi
-        path: /home/ubuntu/actions-runner/_work/nannyapi
+        path: nannyapi
+        
+    - name: Clean work directory except env.conf
+      run: |
+        find /opt/nannyapi-workdir/ -mindepth 1 -not -name 'env.conf' -delete
+    
+    - name: Deploy binary and static files
+      run: |
+        mv /home/ubuntu/actions-runner/_work/nannyapi/nannyapi/nannyapi/* /opt/nannyapi-workdir/
+        chmod +x /opt/nannyapi-workdir/nannyapi
 
-    #- name: Deploy binary
-    #  run: |
-    #    sudo systemctl restart nannyapi.service
+    - name: Restart nannyapi service
+      run: |
+        sudo systemctl restart nannyapi.service
