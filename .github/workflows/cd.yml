@@ -38,11 +38,11 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: nannyapi
-        path: /home/ubuntu/actions-runner/_work/nannyapi
+        path: nannyapi
     
-    - name: Unzip binary
-      run: |
-        tar -xvf /home/ubuntu/actions-runner/_work/nannyapi/nannyapi      
+    #- name: Unzip binary
+    #  run: |
+    #    tar -xvf /home/ubuntu/actions-runner/_work/nannyapi/nannyapi
 
     #- name: Deploy binary
     #  run: |
