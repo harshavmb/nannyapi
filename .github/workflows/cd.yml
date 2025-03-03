@@ -41,11 +41,15 @@ jobs:
       with:
         name: nannyapi
         path: nannyapi
+        
+    - name: Clean work directory except env.conf
+      run: |
+        find /opt/nannyapi-workdir/ -mindepth 1 -not -name 'env.conf' -delete
     
     - name: Deploy binary and static files
       run: |
-        rm -rf /opt/nannyapi-workdir/*
         mv /home/ubuntu/actions-runner/_work/nannyapi/nannyapi/nannyapi/* /opt/nannyapi-workdir/
+        chmod +x /opt/nannyapi-workdir/nannyapi
 
     - name: Restart nannyapi service
       run: |
