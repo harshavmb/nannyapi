@@ -8,7 +8,9 @@ import (
 	"os"
 
 	"github.com/harshavmb/nannyapi/docs"
+	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
+	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/server"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
@@ -61,8 +63,12 @@ func main() {
 
 	// Initialize User Repository and Service
 	userRepo := user.NewUserRepository(mongoDB)
+	agentInfoRepo := agent.NewAgentInfoRepository(mongoDB)
 	authTokenRepo := user.NewAuthTokenRepository(mongoDB)
+	chatRepo := chat.NewChatRepository(mongoDB)
 	userService := user.NewUserService(userRepo, authTokenRepo)
+	agentService := agent.NewAgentInfoService(agentInfoRepo)
+	chatService := chat.NewChatService(chatRepo, agentService)
 
 	// Initialize GitHub OAuth
 	githubClientID := os.Getenv("GH_CLIENT_ID")
@@ -71,7 +77,7 @@ func main() {
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
 
 	// Create server with Gemini client
-	srv := server.NewServer(geminiClient, githubAuth, userService)
+	srv := server.NewServer(geminiClient, githubAuth, userService, agentService, chatService)
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{

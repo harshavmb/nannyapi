@@ -10,20 +10,25 @@ import (
 	"encoding/json"
 
 	"github.com/google/generative-ai-go/genai"
+	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
+	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // Server represents the HTTP server
 type Server struct {
-	mux          *http.ServeMux
-	geminiClient *api.GeminiClient
-	githubAuth   *auth.GitHubAuth
-	template     *template.Template
-	userService  *user.UserService
+	mux              *http.ServeMux
+	geminiClient     *api.GeminiClient
+	githubAuth       *auth.GitHubAuth
+	template         *template.Template
+	userService      *user.UserService
+	agentInfoService *agent.AgentInfoService
+	chatService      *chat.ChatService
 }
 
 // TemplateData struct
@@ -48,14 +53,14 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 }
 
 // NewServer creates a new Server instance
-func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService) *Server {
+func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService) *Server {
 	mux := http.NewServeMux()
 	templatePath := os.Getenv("NANNY_TEMPLATE_PATH")
 	if templatePath == "" {
 		templatePath = "./static/index.html" // Default template path
 	}
 	tmpl := template.Must(template.ParseFiles(templatePath))
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userService: userService}
+	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userService: userService, agentInfoService: agentInfoService, chatService: chatService}
 	server.routes()
 	return server
 }
@@ -80,13 +85,57 @@ func (s *Server) routes() {
 	// API endoints with token authentication
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("/api/auth-tokens", s.handleGetAuthTokens())
+	apiMux.Handle("/api/user-auth-token", s.handleFetchUserInfoFromToken())
 	apiMux.Handle("DELETE /api/auth-token/{id}", s.handleDeleteAuthToken())
+	apiMux.HandleFunc("POST /api/agent-info", s.handleAgentInfo())
+	apiMux.HandleFunc("GET /api/agent-info/", s.handleGetAgentInfoByID())
+	apiMux.HandleFunc("GET /api/agent-info/{id}", s.handleGetAgentInfoByID())
+	apiMux.HandleFunc("POST /api/chat", s.handleStartChat())
+	apiMux.HandleFunc("PUT /api/chat/{id}", s.handleAddPromptResponse())
+	apiMux.HandleFunc("GET /api/chat/", s.handleGetChatByID())
+	apiMux.HandleFunc("GET /api/chat/{id}", s.handleGetChatByID())
 
 	s.mux.Handle("/api/", s.AuthMiddleware(apiMux))
 
 	// Serve static files from the "static" directory
 	fs := http.FileServer(http.Dir("./static"))
 	s.mux.Handle("/static/", http.StripPrefix("/static/", fs))
+}
+
+// handleFetchUserInfoFromToken handles the fetching of user info from the auth token
+// the request with the following format:
+// Sends a JSOn payload containing the user info to the client with the following format.
+// Response:
+//   - email: string
+//   - name: string
+//   - avatar: string
+//
+// handleFetchUserInfoFromToken godoc
+//
+//	@Summary		Fetch user info from auth token
+//	@Description	Fetch user info from auth token
+//	@Tags			auth-tokens
+//	@Produce		json
+//	@Success		200		{object}	[]string
+//	@Failure		400		{string}    "Bad Request"
+//	@Failure		404		{string}    "Not Found"
+//	@Failure		500		{string}    "Internal Server Error"
+//	@Router			/user-auth-token [get]
+func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, ok := GetUserFromContext(r)
+		if !ok {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		log.Printf("User info found in context: %s", userInfo.Email)
+
+		json.NewEncoder(w).Encode(userInfo)
+	}
 }
 
 // chatHandler returns the complete response of the model to the client. Expects a JSON payload in
@@ -404,5 +453,275 @@ func (s *Server) handleAuthTokensPage() http.HandlerFunc {
 			return
 		}
 		tmpl.Execute(w, data)
+	}
+}
+
+// handleAgentInfo handles the ingestion of agent information
+// @Summary Ingest agent information
+// @Description Ingest agent information
+// @Tags agent-info
+// @Accept json
+// @Produce json
+// @Param agentInfo body agent.AgentInfo true "Agent Information"
+// @Success 201 {object} map[string]string "id of the inserted agent info"
+// @Failure 400 {string} string "Invalid request payload"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 500 {string} string "Failed to save agent info"
+// @Router /api/agent-info [post]
+func (s *Server) handleAgentInfo() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, _ := GetUserFromContext(r)
+		if userInfo == nil {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		var agentInfo agent.AgentInfo
+		if err := json.NewDecoder(r.Body).Decode(&agentInfo); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		// Validate required fields
+		if agentInfo.Hostname == "" || agentInfo.IPAddress == "" || agentInfo.KernelVersion == "" || agentInfo.OsVersion == "" {
+			http.Error(w, "All fields (hostname, ip_address, kernel_version) are required", http.StatusBadRequest)
+			return
+		}
+
+		agentInfo.Email = userInfo.Email
+
+		insertOneResult, err := s.agentInfoService.SaveAgentInfo(r.Context(), agentInfo)
+		if err != nil {
+			http.Error(w, "Failed to save agent info", http.StatusInternalServerError)
+			return
+		}
+
+		// Return the inserted ID in the response
+		response := map[string]string{
+			"id": insertOneResult.InsertedID.(bson.ObjectID).Hex(),
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// handleGetAgentInfo retrieves agent information by id
+// @Summary Get agent info by ID
+// @Description Retrieves agent information by ID
+// @Tags agent-info
+// @Param id path string true "Agent ID"
+// @Produce json
+// @Success 200 {object} agent.AgentInfo "Successfully retrieved agent info"
+// @Failure 400 {string} string "Invalid ID format"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 404 {string} string "Agent info not found"
+// @Failure 500 {string} string "Failed to retrieve agent info"
+// @Router /api/agent-info/{id} [get]
+func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, _ := GetUserFromContext(r)
+		if userInfo == nil {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract the ID from the URL path
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "Agent ID is required", http.StatusBadRequest)
+			return
+		}
+		fmt.Println("ID: ", id)
+
+		// Convert the ID to an ObjectID
+		objectID, err := bson.ObjectIDFromHex(id)
+		if err != nil {
+			http.Error(w, "Invalid ID format", http.StatusBadRequest)
+			return
+		}
+
+		agentInfo, err := s.agentInfoService.GetAgentInfoByID(r.Context(), objectID)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				http.Error(w, "Agent info not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "Failed to retrieve agent info", http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(agentInfo)
+	}
+}
+
+// handleStartChat starts a new chat session
+// @Summary Start a new chat session
+// @Description Starts a new chat session
+// @Tags chat
+// @Accept json
+// @Produce json
+// @Param agentID body string true "Agent ID"
+// @Success 201 {object} chat.Chat "Chat session started successfully"
+// @Failure 500 {string} string "Failed to start chat session"
+// @Router /api/chat [post]
+func (s *Server) handleStartChat() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, _ := GetUserFromContext(r)
+		if userInfo == nil {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		var chat chat.Chat
+		if err := json.NewDecoder(r.Body).Decode(&chat); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		// Validate required fields
+		if chat.AgentID == "" {
+			http.Error(w, "Agent ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// validate whether agentId exists and is in the correct format
+		_, err := bson.ObjectIDFromHex(chat.AgentID)
+		if err != nil {
+			http.Error(w, "Invalid agent_id passed", http.StatusBadRequest)
+			return
+		}
+
+		insertResult, err := s.chatService.StartChat(r.Context(), &chat)
+		if err != nil {
+			http.Error(w, "Failed to start chat session", http.StatusInternalServerError)
+			return
+		}
+
+		if insertResult == nil {
+			http.Error(w, "agent_id doesn't exist", http.StatusBadRequest)
+			return
+		}
+
+		// Return the inserted ID in the response
+		response := map[string]string{
+			"id": insertResult.InsertedID.(bson.ObjectID).Hex(),
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// handleAddPromptResponse adds a prompt-response pair to an existing chat session
+// @Summary Add a prompt-response pair to a chat session
+// @Description Adds a prompt-response pair to an existing chat session
+// @Tags chat
+// @Accept json
+// @Produce json
+// @Param chatID path string true "Chat ID"
+// @Param promptResponse body chat.PromptResponse true "Prompt and Response"
+// @Success 200 {object} chat.Chat "Prompt-response pair added successfully"
+// @Failure 400 {string} string "Invalid request payload"
+// @Failure 404 {string} string "Chat session not found"
+// @Failure 500 {string} string "Failed to add prompt-response pair"
+// @Router /api/chat/{id} [put]
+func (s *Server) handleAddPromptResponse() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, _ := GetUserFromContext(r)
+		if userInfo == nil {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		id := r.PathValue("id")
+		chatID, err := bson.ObjectIDFromHex(id)
+		if err != nil {
+			http.Error(w, "Invalid chat ID format", http.StatusBadRequest)
+			return
+		}
+
+		var promptResponse chat.PromptResponse
+		if err := json.NewDecoder(r.Body).Decode(&promptResponse); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		if promptResponse.Prompt == "" || promptResponse.Type == "" {
+			http.Error(w, "Prompt and Type are required", http.StatusBadRequest)
+			return
+		}
+
+		chat, err := s.chatService.AddPromptResponse(r.Context(), chatID, promptResponse)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				http.Error(w, "Chat session not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "Failed to add prompt-response pair", http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(chat)
+	}
+}
+
+// handleGetChatByID retrieves a chat session by ID
+// @Summary Get a chat session by ID
+// @Description Retrieves a chat session by ID
+// @Tags chat
+// @Produce json
+// @Param chatID path string true "Chat ID"
+// @Success 200 {object} chat.Chat "Successfully retrieved chat session"
+// @Failure 400 {string} string "Invalid chat ID format"
+// @Failure 404 {string} string "Chat session not found"
+// @Failure 500 {string} string "Failed to retrieve chat session"
+// @Router /api/chat/{id} [get]
+func (s *Server) handleGetChatByID() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, _ := GetUserFromContext(r)
+		if userInfo == nil {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract the ID from the URL path
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "Chat ID is required", http.StatusBadRequest)
+			return
+		}
+
+		chatID, err := bson.ObjectIDFromHex(id)
+		if err != nil {
+			http.Error(w, "Invalid chat ID format", http.StatusBadRequest)
+			return
+		}
+
+		chat, err := s.chatService.GetChatByID(r.Context(), chatID)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				http.Error(w, "Chat session not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "Failed to retrieve chat session", http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(chat)
 	}
 }
