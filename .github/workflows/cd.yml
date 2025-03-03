@@ -3,6 +3,7 @@ name: CD
 on:
   push:
     branches:
+      - fix-cd ## temp only for testing
       - main
 
 jobs:
@@ -23,7 +24,7 @@ jobs:
         GOARCH=arm64 go build -o nannyapi ./cmd/main.go
 
     - name: Upload binary
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: nannyapi
         path: nannyapi
@@ -34,7 +35,7 @@ jobs:
 
     steps:
     - name: Download binary
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: nannyapi
         path: /home/ubuntu/actions-runner/_work/nannyapi
