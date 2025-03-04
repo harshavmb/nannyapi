@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -939,53 +938,57 @@ func TestChatService_GetChatByID(t *testing.T) {
 	})
 }
 
-func TestSwaggerURL(t *testing.T) {
+func TestNannyAPIPortOverride(t *testing.T) {
 	// Set the environment variable
-	os.Setenv("NANNY_SWAGGER_URL", "http://localhost:8080/swagger/doc.json")
-	defer os.Unsetenv("NANNY_SWAGGER_URL")
+	os.Setenv("NANNY_API_PORT", "9090")
+	defer os.Unsetenv("NANNYAPI_PORT")
 
-	// Create a new server instance
-	s := &Server{mux: http.NewServeMux()}
-	s.routes()
+	server, cleanup, _ := setupServer(t)
+	defer cleanup()
 
-	// Create a request to the Swagger endpoint
-	req, err := http.NewRequest("GET", "/swagger/index.html", nil)
+	// Check if the server is running on the correct port
+	assert.Equal(t, "9090", server.nannyAPIPort)
+
+	req, err := http.NewRequest("GET", "/status", nil)
 	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
+		t.Fatalf("Could not create request: %v", err)
 	}
 
-	// Create a response recorder
-	rr := httptest.NewRecorder()
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, req)
 
-	// Serve the request
-	s.ServeHTTP(rr, req)
-
-	// Check the response status code
-	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	if status := recorder.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v",
+			status, http.StatusOK)
 	}
 
-	// Extract the Swagger URL from the HTML response
-	expectedURL := "http://localhost:8080/swagger/doc.json"
-	actualURL, err := extractSwaggerURL(rr.Body.Bytes())
-	if err != nil {
-		t.Fatalf("Failed to extract Swagger URL: %v", err)
+	expected := `{"status":"ok"}`
+	actual := strings.TrimSpace(recorder.Body.String())
+	if actual != expected {
+		t.Errorf("handler returned unexpected body: got %v want %v", actual, expected)
 	}
-
-	if actualURL != expectedURL {
-		t.Errorf("Expected URL: %s, got: %s", expectedURL, actualURL)
-	}
-
 }
 
-func extractSwaggerURL(html []byte) (string, error) {
-	// Regular expression to find the Swagger URL in the HTML
-	re := regexp.MustCompile(`url\s*:\s*"([^"]+)"`)
-	match := re.FindSubmatch(html)
+func TestSwaggerURL(t *testing.T) {
+	// Set the environment variable
+	os.Setenv("NANNY_SWAGGER_URL", "http://localhost:9090/swagger/doc.json")
+	defer os.Unsetenv("NANNY_SWAGGER_URL")
 
-	if len(match) < 2 {
-		return "", fmt.Errorf("Swagger URL not found in HTML")
-	}
+	server, cleanup, _ := setupServer(t)
+	defer cleanup()
 
-	return string(match[1]), nil
+	// Check if the server is running on the correct github callback url
+	assert.Equal(t, os.Getenv("NANNY_SWAGGER_URL"), server.nannySwaggerURL)
+}
+
+func TestGitHubRedirectURL(t *testing.T) {
+	// Set the environment variable
+	os.Setenv("GH_REDIRECT_URL", "http://example.net/swagger/doc.json")
+	defer os.Unsetenv("GH_REDIRECT_URL")
+
+	server, cleanup, _ := setupServer(t)
+	defer cleanup()
+
+	// Check if the server is running on the correct github callback url
+	assert.Equal(t, os.Getenv("GH_REDIRECT_URL"), server.gitHubRedirectURL)
 }

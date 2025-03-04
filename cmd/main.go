@@ -1,8 +1,8 @@
 package main
 
 import (
-	"cmp"
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -61,6 +61,12 @@ func main() {
 		log.Fatalf("NANNY_ENCRYPTION_KEY not set")
 	}
 
+	// Access preferred port the server must listen to as an environment variable if provided.
+	port := defaultPort
+	if os.Getenv("NANNY_API_PORT") == "" {
+		port = os.Getenv("NANNY_API_PORT")
+	}
+
 	// Initialize User Repository and Service
 	userRepo := user.NewUserRepository(mongoDB)
 	agentInfoRepo := agent.NewAgentInfoRepository(mongoDB)
@@ -76,7 +82,7 @@ func main() {
 	// Get the GitHub redirect URL from the environment variable
 	githubRedirectURL := os.Getenv("GH_REDIRECT_URL")
 	if githubRedirectURL == "" {
-		githubRedirectURL = "http://localhost:8080/github/callback"
+		githubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", port)
 	}
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
 
@@ -89,12 +95,6 @@ func main() {
 		AllowedHeaders: []string{"Access-Control-Allow-Origin", "Content-Type"},
 	})
 	handler := c.Handler(srv)
-
-	// Access preferred port the server must listen to as an environment variable if provided.
-	port := cmp.Or(os.Getenv("NANNYAPI_PORT"), defaultPort)
-	if port == "" {
-		port = defaultPort
-	}
 
 	log.Printf("Starting server on port %s...", port)
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
