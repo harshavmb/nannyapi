@@ -91,12 +91,12 @@ go run ./cmd/main.go
 The API endpoints are documented using Swagger. You can view the Swagger UI by navigating to:
 
 ```
-http://localhost:8080/swagger/index.html
+https://nannyai.harshanu.space/swagger/index.html
 ```
 
-(Replace `localhost:8080` with your actual host and port if you've overridden the defaults.)
+(Replace with `localhost:8080` if you are testing locally.)
 
-The base path for the API is `/api/v1`.
+The base path for the API is `/api/`.
 
 ### Available Endpoints
 

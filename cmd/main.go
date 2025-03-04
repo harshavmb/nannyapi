@@ -63,7 +63,7 @@ func main() {
 
 	// Access preferred port the server must listen to as an environment variable if provided.
 	port := defaultPort
-	if os.Getenv("NANNY_API_PORT") == "" {
+	if os.Getenv("NANNY_API_PORT") != "" {
 		port = os.Getenv("NANNY_API_PORT")
 	}
 
