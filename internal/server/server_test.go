@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -936,4 +937,55 @@ func TestChatService_GetChatByID(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	})
+}
+
+func TestSwaggerURL(t *testing.T) {
+	// Set the environment variable
+	os.Setenv("NANNY_SWAGGER_URL", "http://localhost:8080/swagger/doc.json")
+	defer os.Unsetenv("NANNY_SWAGGER_URL")
+
+	// Create a new server instance
+	s := &Server{mux: http.NewServeMux()}
+	s.routes()
+
+	// Create a request to the Swagger endpoint
+	req, err := http.NewRequest("GET", "/swagger/index.html", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	// Create a response recorder
+	rr := httptest.NewRecorder()
+
+	// Serve the request
+	s.ServeHTTP(rr, req)
+
+	// Check the response status code
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+
+	// Extract the Swagger URL from the HTML response
+	expectedURL := "http://localhost:8080/swagger/doc.json"
+	actualURL, err := extractSwaggerURL(rr.Body.Bytes())
+	if err != nil {
+		t.Fatalf("Failed to extract Swagger URL: %v", err)
+	}
+
+	if actualURL != expectedURL {
+		t.Errorf("Expected URL: %s, got: %s", expectedURL, actualURL)
+	}
+
+}
+
+func extractSwaggerURL(html []byte) (string, error) {
+	// Regular expression to find the Swagger URL in the HTML
+	re := regexp.MustCompile(`url\s*:\s*"([^"]+)"`)
+	match := re.FindSubmatch(html)
+
+	if len(match) < 2 {
+		return "", fmt.Errorf("Swagger URL not found in HTML")
+	}
+
+	return string(match[1]), nil
 }

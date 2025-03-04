@@ -49,7 +49,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "201": {
-                        "description": "Agent info saved successfully",
+                        "description": "id of the inserted agent info",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -203,6 +203,150 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Failed to retrieve auth tokens",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/chat": {
+            "post": {
+                "description": "Starts a new chat session",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Start a new chat session",
+                "parameters": [
+                    {
+                        "description": "Agent ID",
+                        "name": "agentID",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Chat session started successfully",
+                        "schema": {
+                            "$ref": "#/definitions/chat.Chat"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to start chat session",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/chat/{id}": {
+            "get": {
+                "description": "Retrieves a chat session by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Get a chat session by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Chat ID",
+                        "name": "chatID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successfully retrieved chat session",
+                        "schema": {
+                            "$ref": "#/definitions/chat.Chat"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid chat ID format",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Chat session not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve chat session",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Adds a prompt-response pair to an existing chat session",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Add a prompt-response pair to a chat session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Chat ID",
+                        "name": "chatID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Prompt and Response",
+                        "name": "promptResponse",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat.PromptResponse"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Prompt-response pair added successfully",
+                        "schema": {
+                            "$ref": "#/definitions/chat.Chat"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Chat session not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to add prompt-response pair",
                         "schema": {
                             "type": "string"
                         }
@@ -394,6 +538,41 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "os_version": {
+                    "type": "string"
+                }
+            }
+        },
+        "chat.Chat": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "history": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/chat.PromptResponse"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "chat.PromptResponse": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string"
+                },
+                "response": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"commands\" or \"text\"",
                     "type": "string"
                 }
             }

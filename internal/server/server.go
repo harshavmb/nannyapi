@@ -67,10 +67,16 @@ func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, user
 
 // routes defines the routes for the server
 func (s *Server) routes() {
+
+	swaggerURL := os.Getenv("NANNY_SWAGGER_URL")
+	if swaggerURL == "" {
+		swaggerURL = "http://localhost:8080/swagger/doc.json" // Default Swagger URL
+	}
+
 	s.mux.HandleFunc("POST /chat", s.chatHandler)
 	s.mux.HandleFunc("/status", s.handleStatus())
 	s.mux.HandleFunc("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+		httpSwagger.URL(swaggerURL),
 	))
 	s.mux.HandleFunc("/github/login", s.githubAuth.HandleGitHubLogin())
 	s.mux.HandleFunc("/github/callback", s.githubAuth.HandleGitHubCallback())
