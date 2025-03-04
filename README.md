@@ -155,7 +155,7 @@ The `helper.go` file contains utility functions for encryption, decryption, and 
 
 ## Contributing
 
-We welcome contributions! Please see [Contributors](./CONTRIBUTORS.md) for guidelines on how to contribute.
+We welcome contributions! Please see [Contributors](./Contributors.md) for guidelines on how to contribute.
 
 ## License
 
