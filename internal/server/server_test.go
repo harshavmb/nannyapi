@@ -937,3 +937,58 @@ func TestChatService_GetChatByID(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	})
 }
+
+func TestNannyAPIPortOverride(t *testing.T) {
+	// Set the environment variable
+	os.Setenv("NANNY_API_PORT", "9090")
+	defer os.Unsetenv("NANNYAPI_PORT")
+
+	server, cleanup, _ := setupServer(t)
+	defer cleanup()
+
+	// Check if the server is running on the correct port
+	assert.Equal(t, "9090", server.nannyAPIPort)
+
+	req, err := http.NewRequest("GET", "/status", nil)
+	if err != nil {
+		t.Fatalf("Could not create request: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, req)
+
+	if status := recorder.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v",
+			status, http.StatusOK)
+	}
+
+	expected := `{"status":"ok"}`
+	actual := strings.TrimSpace(recorder.Body.String())
+	if actual != expected {
+		t.Errorf("handler returned unexpected body: got %v want %v", actual, expected)
+	}
+}
+
+func TestSwaggerURL(t *testing.T) {
+	// Set the environment variable
+	os.Setenv("NANNY_SWAGGER_URL", "http://localhost:9090/swagger/doc.json")
+	defer os.Unsetenv("NANNY_SWAGGER_URL")
+
+	server, cleanup, _ := setupServer(t)
+	defer cleanup()
+
+	// Check if the server is running on the correct github callback url
+	assert.Equal(t, os.Getenv("NANNY_SWAGGER_URL"), server.nannySwaggerURL)
+}
+
+func TestGitHubRedirectURL(t *testing.T) {
+	// Set the environment variable
+	os.Setenv("GH_REDIRECT_URL", "http://example.net/swagger/doc.json")
+	defer os.Unsetenv("GH_REDIRECT_URL")
+
+	server, cleanup, _ := setupServer(t)
+	defer cleanup()
+
+	// Check if the server is running on the correct github callback url
+	assert.Equal(t, os.Getenv("GH_REDIRECT_URL"), server.gitHubRedirectURL)
+}

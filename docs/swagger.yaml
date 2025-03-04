@@ -16,6 +16,29 @@ definitions:
       os_version:
         type: string
     type: object
+  chat.Chat:
+    properties:
+      agent_id:
+        type: string
+      created_at:
+        type: string
+      history:
+        items:
+          $ref: '#/definitions/chat.PromptResponse'
+        type: array
+      id:
+        type: string
+    type: object
+  chat.PromptResponse:
+    properties:
+      prompt:
+        type: string
+      response:
+        type: string
+      type:
+        description: '"commands" or "text"'
+        type: string
+    type: object
   server.AuthTokenData:
     properties:
       createdAt:
@@ -73,7 +96,7 @@ paths:
       - application/json
       responses:
         "201":
-          description: Agent info saved successfully
+          description: id of the inserted agent info
           schema:
             additionalProperties:
               type: string
@@ -180,6 +203,101 @@ paths:
       summary: Get all auth tokens
       tags:
       - auth-tokens
+  /api/chat:
+    post:
+      consumes:
+      - application/json
+      description: Starts a new chat session
+      parameters:
+      - description: Agent ID
+        in: body
+        name: agentID
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Chat session started successfully
+          schema:
+            $ref: '#/definitions/chat.Chat'
+        "500":
+          description: Failed to start chat session
+          schema:
+            type: string
+      summary: Start a new chat session
+      tags:
+      - chat
+  /api/chat/{id}:
+    get:
+      description: Retrieves a chat session by ID
+      parameters:
+      - description: Chat ID
+        in: path
+        name: chatID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Successfully retrieved chat session
+          schema:
+            $ref: '#/definitions/chat.Chat'
+        "400":
+          description: Invalid chat ID format
+          schema:
+            type: string
+        "404":
+          description: Chat session not found
+          schema:
+            type: string
+        "500":
+          description: Failed to retrieve chat session
+          schema:
+            type: string
+      summary: Get a chat session by ID
+      tags:
+      - chat
+    put:
+      consumes:
+      - application/json
+      description: Adds a prompt-response pair to an existing chat session
+      parameters:
+      - description: Chat ID
+        in: path
+        name: chatID
+        required: true
+        type: string
+      - description: Prompt and Response
+        in: body
+        name: promptResponse
+        required: true
+        schema:
+          $ref: '#/definitions/chat.PromptResponse'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Prompt-response pair added successfully
+          schema:
+            $ref: '#/definitions/chat.Chat'
+        "400":
+          description: Invalid request payload
+          schema:
+            type: string
+        "404":
+          description: Chat session not found
+          schema:
+            type: string
+        "500":
+          description: Failed to add prompt-response pair
+          schema:
+            type: string
+      summary: Add a prompt-response pair to a chat session
+      tags:
+      - chat
   /auth-tokens:
     get:
       description: Serves the auth tokens page.

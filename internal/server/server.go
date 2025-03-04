@@ -22,13 +22,16 @@ import (
 
 // Server represents the HTTP server
 type Server struct {
-	mux              *http.ServeMux
-	geminiClient     *api.GeminiClient
-	githubAuth       *auth.GitHubAuth
-	template         *template.Template
-	userService      *user.UserService
-	agentInfoService *agent.AgentInfoService
-	chatService      *chat.ChatService
+	mux               *http.ServeMux
+	geminiClient      *api.GeminiClient
+	githubAuth        *auth.GitHubAuth
+	template          *template.Template
+	userService       *user.UserService
+	agentInfoService  *agent.AgentInfoService
+	chatService       *chat.ChatService
+	nannyAPIPort      string
+	nannySwaggerURL   string
+	gitHubRedirectURL string
 }
 
 // TemplateData struct
@@ -55,22 +58,45 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 // NewServer creates a new Server instance
 func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService) *Server {
 	mux := http.NewServeMux()
+
+	// override default template path if NANNY_TEMPLATE_PATH is set
 	templatePath := os.Getenv("NANNY_TEMPLATE_PATH")
 	if templatePath == "" {
 		templatePath = "./static/index.html" // Default template path
 	}
+
+	// override default nanny API port if NANNY_API_PORT is set
+	nannyAPIPort := os.Getenv("NANNY_API_PORT")
+	if nannyAPIPort == "" {
+		nannyAPIPort = "8080" // Default port
+	}
+
+	// override default nanny Swagger URL if NANNY_SWAGGER_URL is set
+	nannySwaggerURL := os.Getenv("NANNY_SWAGGER_URL")
+	if nannySwaggerURL == "" {
+		nannySwaggerURL = fmt.Sprintf("http://localhost:%s/swagger/doc.json", nannyAPIPort) // Default Swagger URL
+	}
+
+	// Fix-me
+	// this is duplicate I know, not sure how to do it elegantly
+	gitHubRedirectURL := os.Getenv("GH_REDIRECT_URL")
+	if gitHubRedirectURL == "" {
+		gitHubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", nannyAPIPort) // Default GitHubCallback URL
+	}
+
 	tmpl := template.Must(template.ParseFiles(templatePath))
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userService: userService, agentInfoService: agentInfoService, chatService: chatService}
+	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userService: userService, agentInfoService: agentInfoService, chatService: chatService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL}
 	server.routes()
 	return server
 }
 
 // routes defines the routes for the server
 func (s *Server) routes() {
+
 	s.mux.HandleFunc("POST /chat", s.chatHandler)
 	s.mux.HandleFunc("/status", s.handleStatus())
 	s.mux.HandleFunc("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+		httpSwagger.URL(s.nannySwaggerURL),
 	))
 	s.mux.HandleFunc("/github/login", s.githubAuth.HandleGitHubLogin())
 	s.mux.HandleFunc("/github/callback", s.githubAuth.HandleGitHubCallback())
