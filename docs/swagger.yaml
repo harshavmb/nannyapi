@@ -80,42 +80,6 @@ info:
     name: GNU General Public License v3.0
     url: https://www.gnu.org/licenses/gpl-3.0.html
 paths:
-  /api/agent-info:
-    post:
-      consumes:
-      - application/json
-      description: Ingest agent information
-      parameters:
-      - description: Agent Information
-        in: body
-        name: agentInfo
-        required: true
-        schema:
-          $ref: '#/definitions/agent.AgentInfo'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: id of the inserted agent info
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Invalid request payload
-          schema:
-            type: string
-        "401":
-          description: User not authenticated
-          schema:
-            type: string
-        "500":
-          description: Failed to save agent info
-          schema:
-            type: string
-      summary: Ingest agent information
-      tags:
-      - agent-info
   /api/agent-info/{id}:
     get:
       description: Retrieves agent information by ID
@@ -149,6 +113,71 @@ paths:
           schema:
             type: string
       summary: Get agent info by ID
+      tags:
+      - agent-info
+  /api/agent-infos:
+    post:
+      consumes:
+      - application/json
+      description: Ingest agent information
+      parameters:
+      - description: Agent Information
+        in: body
+        name: agentInfo
+        required: true
+        schema:
+          $ref: '#/definitions/agent.AgentInfo'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: id of the inserted agent info
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            type: string
+        "401":
+          description: User not authenticated
+          schema:
+            type: string
+        "500":
+          description: Failed to retrieve agents info
+          schema:
+            type: string
+      summary: Ingest agent information
+      tags:
+      - agent-info
+  /api/agents:
+    post:
+      consumes:
+      - application/json
+      description: Ingest agent information
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Successfully retrieved agent info
+          schema:
+            items:
+              $ref: '#/definitions/agent.AgentInfo'
+            type: array
+        "400":
+          description: Invalid request payload
+          schema:
+            type: string
+        "401":
+          description: User not authenticated
+          schema:
+            type: string
+        "500":
+          description: Failed to retrieve agents info
+          schema:
+            type: string
+      summary: Ingest agent information
       tags:
       - agent-info
   /api/auth-token/{id}:
@@ -298,6 +327,39 @@ paths:
       summary: Add a prompt-response pair to a chat session
       tags:
       - chat
+  /api/user/{param}:
+    get:
+      description: Fetch user info from email
+      parameters:
+      - description: Email address/ID of the user
+        in: path
+        name: param
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      summary: Fetch user info from email
+      tags:
+      - user-from-email
   /auth-tokens:
     get:
       description: Serves the auth tokens page.

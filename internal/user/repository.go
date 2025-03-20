@@ -71,6 +71,19 @@ func (r *UserRepository) FindUserByEmail(ctx context.Context, email string) (*Us
 	return &user, nil
 }
 
+func (r *UserRepository) FindUserByID(ctx context.Context, userId bson.ObjectID) (*User, error) {
+	filter := bson.M{"_id": userId}
+	var user User
+	err := r.collection.FindOne(ctx, filter).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, mongo.ErrNoDocuments // No user found
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (r *AuthTokenRepository) CreateAuthToken(ctx context.Context, encryptedToken, userEmail, hashedToken string) (*AuthToken, error) {
 	authToken := &AuthToken{
 		Email:       userEmail,
@@ -172,7 +185,7 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (*Use
 	err := r.collection.FindOne(ctx, filter).Decode(&user)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("user not found")
+			return nil, mongo.ErrNoDocuments
 		}
 		return nil, fmt.Errorf("failed to find user: %w", err)
 	}
@@ -192,4 +205,11 @@ func (r *AuthTokenRepository) GetAuthTokenByHashedToken(ctx context.Context, has
 		return nil, fmt.Errorf("failed to retrieve auth token: %v", err)
 	}
 	return &authToken, nil
+}
+
+// SHOULDN'T be used in this project as GitHub OAuth is used
+func (r *UserRepository) CreateUser(ctx context.Context, user *User) (*mongo.InsertOneResult, error) {
+	user.LastLoggedIn = time.Now()
+
+	return r.collection.InsertOne(ctx, user)
 }

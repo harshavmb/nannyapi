@@ -96,3 +96,55 @@ func TestAgentInfoRepository(t *testing.T) {
 		assert.Nil(t, agentInfo)
 	})
 }
+
+func TestGetAgents(t *testing.T) {
+	client, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewAgentInfoRepository(client.Database(testDBName))
+
+	t.Run("ValidAgents", func(t *testing.T) {
+		// Insert test agents into the database
+		agents := []AgentInfo{
+			{
+				Email:         "test1@example.com",
+				Hostname:      "host1",
+				IPAddress:     "192.168.1.1",
+				KernelVersion: "5.10.0",
+				OsVersion:     "Ubuntu 24.04",
+			},
+			{
+				Email:         "test1@example.com",
+				Hostname:      "host2",
+				IPAddress:     "192.168.1.2",
+				KernelVersion: "3.10.0",
+				OsVersion:     "Ubuntu 18.04",
+			},
+			{
+				Email:         "test2@example.com",
+				Hostname:      "host3",
+				IPAddress:     "192.168.1.3",
+				KernelVersion: "5.11.0",
+				OsVersion:     "Ubuntu 22.04",
+			},
+		}
+
+		for _, agent := range agents {
+			_, err := repo.InsertAgentInfo(context.Background(), &agent)
+			assert.NoError(t, err)
+		}
+
+		// Fetch agents
+		result, err := repo.GetAgents(context.Background(), "test1@example.com")
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "test1@example.com", result[0].Email)
+	})
+
+	t.Run("NoAgents", func(t *testing.T) {
+		// Ensure no agents exist in the database
+		result, err := repo.GetAgents(context.Background(), "nonexistent@email.com")
+		assert.NoError(t, err)
+		assert.Empty(t, result)
+	})
+}

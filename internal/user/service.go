@@ -163,7 +163,20 @@ func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*User, 
 	user, err := s.userRepo.GetUserByEmail(ctx, email)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("user not found")
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to find user: %w", err)
+	}
+
+	return user, nil
+}
+
+// GetUserByID retrieves a user by their id.
+func (s *UserService) GetUserByID(ctx context.Context, id bson.ObjectID) (*User, error) {
+	user, err := s.userRepo.FindUserByID(ctx, id)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to find user: %w", err)
 	}
@@ -179,4 +192,13 @@ func (s *UserService) GetAuthTokenByHashedToken(ctx context.Context, hashedToken
 		return nil, fmt.Errorf("failed to retrieve auth token: %v", err)
 	}
 	return authToken, nil
+}
+
+func (s *UserService) CreateUser(ctx context.Context, user User) (*mongo.InsertOneResult, error) {
+	insertInfo, err := s.userRepo.CreateUser(ctx, &user)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user info: %v", err)
+	}
+	log.Printf("Created user info: %s", insertInfo.InsertedID)
+	return insertInfo, nil
 }
