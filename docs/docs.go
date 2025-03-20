@@ -23,61 +23,6 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/agent-info": {
-            "post": {
-                "description": "Ingest agent information",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "agent-info"
-                ],
-                "summary": "Ingest agent information",
-                "parameters": [
-                    {
-                        "description": "Agent Information",
-                        "name": "agentInfo",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/agent.AgentInfo"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "id of the inserted agent info",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request payload",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "401": {
-                        "description": "User not authenticated",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to save agent info",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
         "/api/agent-info/{id}": {
             "get": {
                 "description": "Retrieves agent information by ID",
@@ -124,6 +69,105 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Failed to retrieve agent info",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/agent-infos": {
+            "post": {
+                "description": "Ingest agent information",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-info"
+                ],
+                "summary": "Ingest agent information",
+                "parameters": [
+                    {
+                        "description": "Agent Information",
+                        "name": "agentInfo",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/agent.AgentInfo"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "id of the inserted agent info",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve agents info",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/agents": {
+            "post": {
+                "description": "Ingest agent information",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-info"
+                ],
+                "summary": "Ingest agent information",
+                "responses": {
+                    "200": {
+                        "description": "Successfully retrieved agent info",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/agent.AgentInfo"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve agents info",
                         "schema": {
                             "type": "string"
                         }
@@ -347,6 +391,56 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Failed to add prompt-response pair",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/user/{param}": {
+            "get": {
+                "description": "Fetch user info from email",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user-from-email"
+                ],
+                "summary": "Fetch user info from email",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Email address/ID of the user",
+                        "name": "param",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "string"
                         }

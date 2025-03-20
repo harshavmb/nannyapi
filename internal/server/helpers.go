@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"regexp"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/harshavmb/nannyapi/internal/user"
@@ -158,4 +159,12 @@ func GetUserInfoFromCookie(r *http.Request) (*user.User, error) {
 func IsSessionValid(r *http.Request) bool {
 	_, err := r.Cookie("userinfo")
 	return err == nil
+}
+
+// IsValidEmail checks if a string is a valid email address
+func IsValidEmail(email string) bool {
+	// Use a regular expression to validate the email format
+	emailRegex := `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
+	re := regexp.MustCompile(emailRegex)
+	return re.MatchString(email)
 }

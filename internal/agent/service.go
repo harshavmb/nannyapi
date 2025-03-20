@@ -36,3 +36,14 @@ func (s *AgentInfoService) GetAgentInfoByID(ctx context.Context, id bson.ObjectI
 	}
 	return agentInfo, nil
 }
+
+func (s *AgentInfoService) GetAgents(ctx context.Context, email string) ([]*AgentInfo, error) {
+	agents, err := s.repo.GetAgents(ctx, email)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return agents, nil
+}

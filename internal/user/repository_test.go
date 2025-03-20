@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -145,4 +146,89 @@ func TestAuthTokenRepository(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Nil(t, authToken)
 	})
+}
+
+func TestFindUser(t *testing.T) {
+	client, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := NewUserRepository(client.Database(testDBName))
+
+	t.Run("ValidUser", func(t *testing.T) {
+		// Create a valid user
+		newUser := &User{
+			Email:     "test@example.com",
+			Name:      "Test User",
+			AvatarURL: "https://example.com/avatar.png",
+		}
+
+		// create the user
+		insertedResult, err := repo.CreateUser(context.Background(), newUser)
+		assert.NoError(t, err)
+
+		// Verify the user was inserted
+		createdUser, err := repo.FindUserByID(context.Background(), insertedResult.InsertedID.(bson.ObjectID))
+		assert.NoError(t, err)
+		assert.NotNil(t, createdUser)
+		assert.Equal(t, "test@example.com", createdUser.Email)
+		assert.Equal(t, "Test User", createdUser.Name)
+		assert.Equal(t, "https://example.com/avatar.png", createdUser.AvatarURL)
+
+		// Verify the user was inserted by email
+		createdUserEmail, err := repo.FindUserByEmail(context.Background(), createdUser.Email)
+		assert.NoError(t, err)
+		assert.NotNil(t, createdUserEmail)
+		assert.Equal(t, createdUser.ID, createdUserEmail.ID)
+		assert.Equal(t, "Test User", createdUserEmail.Name)
+		assert.Equal(t, "https://example.com/avatar.png", createdUserEmail.AvatarURL)
+	})
+
+	// Uncomment the following test cases after implementing the duplicate user check
+	// t.Run("DuplicateUser", func(t *testing.T) {
+	// 	// Create a user that already exists
+	// 	existingUser := &User{
+	// 		Email:     "duplicate@example.com",
+	// 		Name:      "Duplicate User",
+	// 		AvatarURL: "https://example.com/avatar.png",
+	// 	}
+
+	// 	_, err := repo.CreateUser(context.Background(), existingUser)
+	// 	assert.NoError(t, err)
+
+	// 	// Attempt to create the same user again
+	// 	_, err = repo.CreateUser(context.Background(), existingUser)
+	// 	assert.Error(t, err)
+	// 	assert.Contains(t, err.Error(), "user already exists")
+	// })
+
+	// t.Run("InvalidUser", func(t *testing.T) {
+	// 	// Create a user with missing required fields
+	// 	invalidUser := &User{
+	// 		Email: "", // Missing email
+	// 	}
+
+	// 	_, err := repo.CreateUser(context.Background(), invalidUser)
+	// 	assert.Error(t, err)
+	// 	assert.Contains(t, err.Error(), "email is required")
+	// })
+
+	// t.Run("NilUser", func(t *testing.T) {
+	// 	// Pass a nil user
+	// 	_, err := repo.CreateUser(context.Background(), nil)
+	// 	assert.Error(t, err)
+	// 	assert.Contains(t, err.Error(), "user cannot be nil")
+	// })
+
+	// t.Run("NilContext", func(t *testing.T) {
+	// 	// Pass a nil context
+	// 	newUser := &User{
+	// 		Email:     "test2@example.com",
+	// 		Name:      "Test User 2",
+	// 		AvatarURL: "https://example.com/avatar2.png",
+	// 	}
+
+	// 	_, err := repo.CreateUser(nil, newUser)
+	// 	assert.Error(t, err)
+	// 	assert.Contains(t, err.Error(), "context is nil")
+	// })
 }

@@ -112,10 +112,12 @@ func (s *Server) routes() {
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("/api/auth-tokens", s.handleGetAuthTokens())
 	apiMux.Handle("/api/user-auth-token", s.handleFetchUserInfoFromToken())
+	apiMux.Handle("GET /api/user/{param}", s.handleFetchUserInfo())
 	apiMux.Handle("DELETE /api/auth-token/{id}", s.handleDeleteAuthToken())
 	apiMux.HandleFunc("POST /api/agent-info", s.handleAgentInfo())
 	apiMux.HandleFunc("GET /api/agent-info/", s.handleGetAgentInfoByID())
 	apiMux.HandleFunc("GET /api/agent-info/{id}", s.handleGetAgentInfoByID())
+	apiMux.HandleFunc("GET /api/agents", s.handleAgentInfos())
 	apiMux.HandleFunc("POST /api/chat", s.handleStartChat())
 	apiMux.HandleFunc("PUT /api/chat/{id}", s.handleAddPromptResponse())
 	apiMux.HandleFunc("GET /api/chat/", s.handleGetChatByID())
@@ -126,6 +128,78 @@ func (s *Server) routes() {
 	// Serve static files from the "static" directory
 	fs := http.FileServer(http.Dir("./static"))
 	s.mux.Handle("/static/", http.StripPrefix("/static/", fs))
+
+}
+
+// handleFetchUserInfo handles the fetching of user info from the email/id
+// the request with the following format:
+// Sends a JSOn payload containing the user info to the client with the following format.
+// Response:
+//   - email: string
+//   - name: string
+//   - avatar: string
+//
+// handleFetchUserInfo godoc
+//
+//	@Summary		Fetch user info from email
+//	@Description	Fetch user info from email
+//	@Tags			user-from-email
+//
+// @Param param path string true "Email address/ID of the user"
+//
+//	@Produce		json
+//	@Success		200		{object}	[]string
+//	@Failure		400		{string}    "Bad Request"
+//	@Failure		404		{string}    "Not Found"
+//	@Failure		500		{string}    "Internal Server Error"
+//	@Router			/api/user/{param} [get]
+func (s *Server) handleFetchUserInfo() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		param := r.PathValue("param")
+
+		var user *user.User
+		var err error
+
+		// Check if the param is a valid email
+		if IsValidEmail(param) {
+			user, err = s.userService.GetUserByEmail(r.Context(), param)
+		} else {
+			// Assume it's an ID and fetch user by ID
+			// Extract user ID from the URL path
+			id := r.PathValue("param")
+			if id == "" {
+				http.Error(w, "Chat ID is required", http.StatusBadRequest)
+				return
+			}
+			userID, err2 := bson.ObjectIDFromHex(id)
+			if err2 != nil {
+				http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+				return
+			}
+			user, err = s.userService.GetUserByID(r.Context(), userID)
+		}
+
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
+				return
+			}
+			log.Printf("Failed to retrieve user info: %v", err)
+			http.Error(w, "Failed to retrieve user info", http.StatusInternalServerError)
+			return
+		}
+
+		if user == nil {
+			http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
+			return
+		}
+
+		log.Printf("User info retreived for: %s", user.Email)
+
+		json.NewEncoder(w).Encode(user)
+	}
 }
 
 // handleFetchUserInfoFromToken handles the fetching of user info from the auth token
@@ -492,8 +566,8 @@ func (s *Server) handleAuthTokensPage() http.HandlerFunc {
 // @Success 201 {object} map[string]string "id of the inserted agent info"
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
-// @Failure 500 {string} string "Failed to save agent info"
-// @Router /api/agent-info [post]
+// @Failure 500 {string} string "Failed to retrieve agents info"
+// @Router /api/agent-infos [post]
 func (s *Server) handleAgentInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -535,6 +609,39 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 	}
 }
 
+// handleGetAgentInfos retrieves agents information
+// @Summary Ingest agent information
+// @Description Ingest agent information
+// @Tags agent-info
+// @Accept json
+// @Produce json
+// @Success 200 {object} []agent.AgentInfo "Successfully retrieved agent info"
+// @Failure 400 {string} string "Invalid request payload"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 500 {string} string "Failed to retrieve agents info"
+// @Router /api/agents [post]
+func (s *Server) handleAgentInfos() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userInfo, _ := GetUserFromContext(r)
+		if userInfo == nil {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		agents, err := s.agentInfoService.GetAgents(r.Context(), userInfo.Email)
+		if err != nil {
+			log.Printf("Failed to retrieve agents info: %v", err)
+			http.Error(w, "Failed to retrieve agents info", http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(agents)
+	}
+}
+
 // handleGetAgentInfo retrieves agent information by id
 // @Summary Get agent info by ID
 // @Description Retrieves agent information by ID
@@ -564,7 +671,6 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 			http.Error(w, "Agent ID is required", http.StatusBadRequest)
 			return
 		}
-		fmt.Println("ID: ", id)
 
 		// Convert the ID to an ObjectID
 		objectID, err := bson.ObjectIDFromHex(id)

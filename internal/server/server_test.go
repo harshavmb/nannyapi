@@ -992,3 +992,189 @@ func TestGitHubRedirectURL(t *testing.T) {
 	// Check if the server is running on the correct github callback url
 	assert.Equal(t, os.Getenv("GH_REDIRECT_URL"), server.gitHubRedirectURL)
 }
+
+func TestHandleAgentInfos(t *testing.T) {
+	server, cleanup, validToken := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// Insert test agent info into the database
+		agentInfo := &agent.AgentInfo{
+			Email:         "test@example.com",
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		if err != nil {
+			t.Fatalf("Failed to save agent info: %v", err)
+		}
+
+		// Fetch the inserted ID
+		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
+
+		// Create a test request to retrieve agents
+		req, err := http.NewRequest("GET", "/api/agents", nil)
+		if err != nil {
+			t.Fatalf("Could not create request: %v", err)
+		}
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		// Check the response body
+		expected := fmt.Sprintf(`[{"id":"%s","email":"test@example.com","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID) // Partial match
+		actual := strings.TrimSpace(recorder.Body.String())
+		if !strings.Contains(actual, expected) {
+			t.Errorf("Expected body to contain %q, but got %q", expected, actual)
+		}
+	})
+
+}
+
+func TestHandleFetchUserInfoFromEmail(t *testing.T) {
+	server, cleanup, validToken := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidEmail", func(t *testing.T) {
+		// Create a request with a valid email
+		req, err := http.NewRequest("GET", "/api/user/test@example.com", nil)
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		var response map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&response)
+		assert.NoError(t, err)
+		assert.Equal(t, "test@example.com", response["email"])
+		assert.Equal(t, "Find Me", response["name"])
+		assert.Equal(t, "http://example.com/avatar.png", response["avatar_url"])
+	})
+
+	// Uncomment this test once the email validation is implemented
+	// t.Run("InvalidEmailFormat", func(t *testing.T) {
+	// 	// Create a request with an invalid email format
+	// 	req, err := http.NewRequest("GET", "/api/user/invalid-email", nil)
+	// 	assert.NoError(t, err)
+
+	// 	// Set a valid Authorization header
+	// 	req.Header.Set("Authorization", "Bearer "+validToken)
+
+	// 	recorder := httptest.NewRecorder()
+	// 	server.ServeHTTP(recorder, req)
+
+	// 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+
+	// 	expected := `{"error":"Invalid email format"}`
+	// 	actual := strings.TrimSpace(recorder.Body.String())
+	// 	assert.Equal(t, expected, actual)
+	// })
+
+	t.Run("UserNotFound", func(t *testing.T) {
+		// Create a request with an email that does not exist in the database
+		req, err := http.NewRequest("GET", "/api/user/nonexistent@example.com", nil)
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+		expected := `{"error":"User not found"}`
+		actual := strings.TrimSpace(recorder.Body.String())
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("UnauthorizedRequest", func(t *testing.T) {
+		// Create a request with a valid email
+		req, err := http.NewRequest("GET", "/api/user/test@example.com", nil)
+		assert.NoError(t, err)
+
+		// Do not set an Authorization header
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+
+		expected := `Authorization header is required`
+		actual := strings.TrimSpace(recorder.Body.String())
+		assert.Equal(t, expected, actual)
+	})
+}
+
+func TestHandleFetchUserInfoFromID(t *testing.T) {
+	server, cleanup, validToken := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidEmail", func(t *testing.T) {
+		// Get the User via email
+		user, err := server.userService.GetUserByEmail(context.Background(), "test@example.com")
+		assert.NoError(t, err)
+
+		// Get the user via ID
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/user/%s", user.ID.Hex()), nil)
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		var response map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&response)
+		assert.NoError(t, err)
+		assert.Equal(t, "test@example.com", response["email"])
+		assert.Equal(t, "Find Me", response["name"])
+		assert.Equal(t, "http://example.com/avatar.png", response["avatar_url"])
+	})
+
+	t.Run("UserNotFound", func(t *testing.T) {
+		// Create a request with an email that does not exist in the database
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/user/%s", bson.NewObjectID().Hex()), nil)
+		assert.NoError(t, err)
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+validToken)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+		expected := `{"error":"User not found"}`
+		actual := strings.TrimSpace(recorder.Body.String())
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("UnauthorizedRequest", func(t *testing.T) {
+		// Create a request with a valid email
+		req, err := http.NewRequest("GET", "/api/user/asdfadsfsf", nil)
+		assert.NoError(t, err)
+
+		// Do not set an Authorization header
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+
+		expected := `Authorization header is required`
+		actual := strings.TrimSpace(recorder.Body.String())
+		assert.Equal(t, expected, actual)
+	})
+}
