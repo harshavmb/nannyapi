@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/harshavmb/nannyapi/internal/user"
@@ -163,8 +164,32 @@ func IsSessionValid(r *http.Request) bool {
 
 // IsValidEmail checks if a string is a valid email address
 func IsValidEmail(email string) bool {
-	// Use a regular expression to validate the email format
-	emailRegex := `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
+	// Updated regular expression to handle IP addresses in square brackets
+	emailRegex := `^(?i)[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|(\[[0-9]{1,3}(\.[0-9]{1,3}){3}\]))$`
 	re := regexp.MustCompile(emailRegex)
-	return re.MatchString(email)
+
+	// Check if the email matches the regex
+	if !re.MatchString(email) {
+		return false
+	}
+
+	// Additional checks for edge cases
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return false
+	}
+
+	// Validate the domain part
+	domain := parts[1]
+	if strings.HasPrefix(domain, "-") || strings.HasSuffix(domain, "-") {
+		return false
+	}
+	if strings.Contains(domain, "..") {
+		return false
+	}
+	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
+		return false
+	}
+
+	return true
 }
