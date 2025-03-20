@@ -28,7 +28,6 @@ jobs:
         name: nannyapi
         path: |
           nannyapi
-          static/
   
   deploy:
     runs-on: [self-hosted, linux, ARM64]

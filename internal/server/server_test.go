@@ -54,9 +54,6 @@ func setupTestDB(t *testing.T) (*mongo.Client, func()) {
 }
 
 func setupServer(t *testing.T) (*Server, func(), string) {
-	// Set the template path for testing
-	os.Setenv("NANNY_TEMPLATE_PATH", "../../static/index.html")
-
 	// Mock Gemini Client
 	mockGeminiClient := &api.GeminiClient{}
 
@@ -128,48 +125,6 @@ func generateHistory(prompts, responses, types []string) []chat.PromptResponse {
 	return history
 }
 
-func TestHandleStatus(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("GET", "/status", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusOK)
-	}
-
-	expected := `{"status":"ok"}`
-	actual := strings.TrimSpace(recorder.Body.String())
-	if actual != expected {
-		t.Errorf("handler returned unexpected body: got %v want %v", actual, expected)
-	}
-}
-
-func TestHandleGetAuthTokens_NoAuth(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("GET", "/api/auth-tokens", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusUnauthorized {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusUnauthorized)
-	}
-}
-
 func TestHandleDeleteAuthToken_NoAuth(t *testing.T) {
 	server, cleanup, _ := setupServer(t)
 	defer cleanup()
@@ -186,60 +141,6 @@ func TestHandleDeleteAuthToken_NoAuth(t *testing.T) {
 	if status := recorder.Code; status != http.StatusUnauthorized {
 		t.Errorf("handler returned wrong status code: got %v want %v",
 			status, http.StatusUnauthorized)
-	}
-}
-
-func TestHandleAuthTokensPage(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("GET", "/auth-tokens", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusUnauthorized {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusUnauthorized)
-	}
-}
-
-func TestHandleCreateAuthToken_NoAuth(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("POST", "/create-auth-token", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusSeeOther {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusSeeOther)
-	}
-}
-
-func TestHandleIndex(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("GET", "/", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusOK)
 	}
 }
 

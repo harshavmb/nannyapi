@@ -68,12 +68,12 @@ func (g *GitHubAuth) HandleGitHubLogin() http.HandlerFunc {
 			Name:     "oauthstate",
 			Value:    state,
 			Expires:  time.Now().Add(1 * time.Hour),
-			HttpOnly: true,
+			HttpOnly: false,
 			Path:     "/", // Ensure the cookie is sent with the callback request
 			SameSite: http.SameSiteLaxMode,
 		})
 		url := g.oauthConf.AuthCodeURL(state, oauth2.AccessTypeOffline)
-		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+		http.Redirect(w, r, url, http.StatusSeeOther)
 	}
 }
 
@@ -98,13 +98,13 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 			Name:     "Authorization",
 			Value:    token.AccessToken,
 			Expires:  time.Now().Add(time.Hour),
-			HttpOnly: true,
+			HttpOnly: false,
 			Path:     "/",
 			SameSite: http.SameSiteLaxMode,
 		})
 
 		// Redirect to the profile page
-		http.Redirect(w, r, "/github/profile", http.StatusSeeOther)
+		http.Redirect(w, r, r.Referer()+"dashboard", http.StatusSeeOther)
 	}
 }
 
@@ -207,8 +207,9 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			Name:     "userinfo",
 			Value:    encodedUserJSON,
 			Path:     "/",
-			Secure:   true,                    // Only send over HTTPS
-			SameSite: http.SameSiteStrictMode, // Mitigate CSRF attacks
+			HttpOnly: false,
+			//Secure:   true, // Only send over HTTPS
+			SameSite: http.SameSiteLaxMode,
 			Expires:  time.Now().Add(24 * time.Hour),
 		}
 		http.SetCookie(w, userCookie)
@@ -218,9 +219,9 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			http.Error(w, "Failed to save user info: "+err.Error(), http.StatusInternalServerError)
 		}
 
-		// Redirect to index
-		redirectURL := "/"
-		http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+		// Write user info to response
+		w.WriteHeader(http.StatusOK)
+		w.Write(userJSON)
 	}
 }
 

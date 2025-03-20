@@ -2,10 +2,10 @@ package server
 
 import (
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"encoding/json"
 
@@ -15,6 +15,7 @@ import (
 	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
+	"github.com/rs/cors"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -25,20 +26,12 @@ type Server struct {
 	mux               *http.ServeMux
 	geminiClient      *api.GeminiClient
 	githubAuth        *auth.GitHubAuth
-	template          *template.Template
 	userService       *user.UserService
 	agentInfoService  *agent.AgentInfoService
 	chatService       *chat.ChatService
 	nannyAPIPort      string
 	nannySwaggerURL   string
 	gitHubRedirectURL string
-}
-
-// TemplateData struct
-type TemplateData struct {
-	User       user.User
-	AuthToken  *user.AuthToken
-	AuthTokens []AuthTokenData
 }
 
 type AuthTokenData struct {
@@ -59,12 +52,6 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService) *Server {
 	mux := http.NewServeMux()
 
-	// override default template path if NANNY_TEMPLATE_PATH is set
-	templatePath := os.Getenv("NANNY_TEMPLATE_PATH")
-	if templatePath == "" {
-		templatePath = "./static/index.html" // Default template path
-	}
-
 	// override default nanny API port if NANNY_API_PORT is set
 	nannyAPIPort := os.Getenv("NANNY_API_PORT")
 	if nannyAPIPort == "" {
@@ -84,8 +71,7 @@ func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, user
 		gitHubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", nannyAPIPort) // Default GitHubCallback URL
 	}
 
-	tmpl := template.Must(template.ParseFiles(templatePath))
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, template: tmpl, userService: userService, agentInfoService: agentInfoService, chatService: chatService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL}
+	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL}
 	server.routes()
 	return server
 }
@@ -101,12 +87,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/github/login", s.githubAuth.HandleGitHubLogin())
 	s.mux.HandleFunc("/github/callback", s.githubAuth.HandleGitHubCallback())
 	s.mux.HandleFunc("/github/profile", s.githubAuth.HandleGitHubProfile())
-	s.mux.HandleFunc("/", s.handleIndex())
-	s.mux.HandleFunc("POST /create-auth-token", s.handleCreateAuthToken())
-	s.mux.Handle("DELETE /auth-token/{id}", s.handleDeleteAuthToken())
-	//s.mux.HandleFunc("/api/auth-tokens", s.handleGetAuthTokens())
-	//s.mux.HandleFunc("DELETE /api/auth-tokens/{id}", s.handleDeleteAuthToken())
-	s.mux.HandleFunc("/auth-tokens", s.handleAuthTokensPage())
 
 	// API endoints with token authentication
 	apiMux := http.NewServeMux()
@@ -123,11 +103,34 @@ func (s *Server) routes() {
 	apiMux.HandleFunc("GET /api/chat/", s.handleGetChatByID())
 	apiMux.HandleFunc("GET /api/chat/{id}", s.handleGetChatByID())
 
-	s.mux.Handle("/api/", s.AuthMiddleware(apiMux))
+	// Create a new CORS handler
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:8081", "https://nannyai.harshanu.space"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Origin", "Content-Type", "Authorization"},
+		AllowCredentials: true,
+	})
 
-	// Serve static files from the "static" directory
-	fs := http.FileServer(http.Dir("./static"))
-	s.mux.Handle("/static/", http.StripPrefix("/static/", fs))
+	//s.mux.Handle("/api/", s.AuthMiddleware(apiMux))
+
+	// Create a CORS middleware that applies to specific paths
+	corsMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Check if the request path matches the desired pattern
+			if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/github/login" || r.URL.Path == "/github/callback" || r.URL.Path == "/github/profile" {
+				c.Handler(next).ServeHTTP(w, r)
+			} else {
+				next.ServeHTTP(w, r)
+			}
+		})
+	}
+
+	// Apply the CORS middleware to the main mux
+	s.mux.Handle("/index", corsMiddleware(s.mux))
+
+	// Wrap the API mux with the CORS handler
+	s.mux.Handle("/api/", c.Handler(s.AuthMiddleware(apiMux)))
+	//s.mux.Handle("/", c.Handler(s.AuthMiddleware(http.HandlerFunc(s.handleIndex()))))
 
 }
 
@@ -334,90 +337,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// handleCreateAuthToken handles the creation of auth tokens
-func (s *Server) handleCreateAuthToken() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Check if user info is already in the cookie
-		userInfo, err := GetUserInfoFromCookie(r)
-		if err != nil {
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
-		}
-		encryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
-		if encryptionKey == "" {
-			return
-		}
-
-		// Create auth token
-		log.Printf("Creating auth token for user %s", userInfo.Email)
-		authToken, err := s.userService.CreateAuthToken(r.Context(), userInfo.Email, encryptionKey)
-		if err != nil {
-			log.Printf("Failed to create auth token: %v", err)
-			http.Error(w, "Failed to create auth token", http.StatusInternalServerError)
-			return
-		}
-
-		if authToken == nil {
-			log.Printf("Failed to create auth token")
-			http.Error(w, "Failed to create auth token", http.StatusInternalServerError)
-			return
-		}
-
-		// Check if the auth token is already retrieved
-		if !authToken.Retrieved {
-			decryptedAuthToken, err := s.userService.GetAuthTokenByToken(r.Context(), authToken.Token)
-			if err != nil {
-				log.Printf("Failed to retrieve auth token: %v", err)
-				http.Error(w, "Failed to retrieve auth token", http.StatusInternalServerError)
-				return
-			}
-			authToken.Token = decryptedAuthToken.Token
-		}
-
-		// Render the create-auth-token.html page
-		tmpl, err := template.ParseFiles("./static/create_auth_token.html")
-		if err != nil {
-			log.Printf("Failed to parse create_auth_token.html: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-
-		data := TemplateData{
-			AuthToken: authToken,
-		}
-
-		err = tmpl.Execute(w, data)
-		if err != nil {
-			log.Printf("Failed to execute template: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-	}
-}
-
-// handleIndex handles the index route
-func (s *Server) handleIndex() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-
-		encryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
-		if encryptionKey == "" {
-			return
-		}
-
-		// Check if user info is already in the cookie
-		userInfo, err := GetUserInfoFromCookie(r)
-		if err == nil {
-			data := TemplateData{
-				User: *userInfo,
-			}
-
-			s.template.Execute(w, data)
-
-		}
-		s.template.Execute(w, TemplateData{})
-	}
-}
-
 // handleGetAuthTokens retrieves all auth tokens for the authenticated user.
 // @Summary Get all auth tokens
 // @Description Retrieves all auth tokens for the authenticated user.
@@ -504,55 +423,6 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 
 		// Return success response
 		json.NewEncoder(w).Encode(map[string]string{"message": "Auth token deleted successfully"})
-	}
-}
-
-// handleAuthTokensPage serves the auth tokens page.
-// @Summary Get auth tokens page
-// @Description Serves the auth tokens page.
-// @Tags auth-tokens
-// @Produce html
-// @Success 200 {string} string "Successfully served auth tokens page"
-// @Failure 500 {string} string "Internal Server Error"
-// @Router /auth-tokens [get]
-func (s *Server) handleAuthTokensPage() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Check if user info is already in the cookie
-		userInfo, err := GetUserInfoFromCookie(r)
-		if err != nil {
-			http.Error(w, "User not authenticated", http.StatusUnauthorized)
-			return
-		}
-
-		// Retrieve all auth tokens for the user
-		authTokens, err := s.userService.GetAllAuthTokens(r.Context(), userInfo.Email)
-		if err != nil {
-			log.Printf("Failed to retrieve auth tokens: %v", err)
-			http.Error(w, "Failed to retrieve auth tokens", http.StatusInternalServerError)
-			return
-		}
-
-		var authTokenDataList []AuthTokenData
-		for _, token := range authTokens {
-
-			authTokenDataList = append(authTokenDataList, AuthTokenData{
-				ID:          token.ID.Hex(),
-				MaskedToken: token.Token,
-				CreatedAt:   token.CreatedAt.String(),
-			})
-		}
-
-		data := TemplateData{
-			AuthTokens: authTokenDataList,
-		}
-
-		tmpl, err := template.ParseFiles("./static/auth_tokens.html")
-		if err != nil {
-			log.Printf("Failed to parse auth_tokens.html: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-		tmpl.Execute(w, data)
 	}
 }
 
