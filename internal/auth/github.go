@@ -9,7 +9,6 @@ import (
 	"log"
 	"math/big"
 	"net/http"
-	"net/url"
 	"reflect"
 	"time"
 
@@ -68,7 +67,7 @@ func (g *GitHubAuth) HandleGitHubLogin() http.HandlerFunc {
 			Name:     "oauthstate",
 			Value:    state,
 			Expires:  time.Now().Add(1 * time.Hour),
-			HttpOnly: false,
+			HttpOnly: true,
 			Path:     "/", // Ensure the cookie is sent with the callback request
 			SameSite: http.SameSiteLaxMode,
 		})
@@ -98,18 +97,21 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 			Name:     "Authorization",
 			Value:    token.AccessToken,
 			Expires:  time.Now().Add(time.Hour),
-			HttpOnly: false,
+			HttpOnly: true,
 			Path:     "/",
 			SameSite: http.SameSiteLaxMode,
 		})
 
+		url := "http://localhost:8081/dashboard"
+
 		// Redirect to the profile page
-		http.Redirect(w, r, r.Referer()+"dashboard", http.StatusSeeOther)
+		http.Redirect(w, r, url, http.StatusSeeOther)
 	}
 }
 
 func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
 		tokenCookie, err := r.Cookie("Authorization")
 		if err != nil {
 			http.Error(w, "Authorization cookie missing", http.StatusUnauthorized)
@@ -192,36 +194,12 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			}
 		}
 
-		// Store user info in a cookie
-		userJSON, err := json.Marshal(user)
-		if err != nil {
-			log.Printf("Failed to marshal user info: %v", err)
-			http.Error(w, "Failed to store user info", http.StatusInternalServerError)
-			return
-		}
-
-		// URL-encode the JSON string
-		encodedUserJSON := url.QueryEscape(string(userJSON))
-
-		userCookie = &http.Cookie{
-			Name:     "userinfo",
-			Value:    encodedUserJSON,
-			Path:     "/",
-			HttpOnly: false,
-			//Secure:   true, // Only send over HTTPS
-			SameSite: http.SameSiteLaxMode,
-			Expires:  time.Now().Add(24 * time.Hour),
-		}
-		http.SetCookie(w, userCookie)
-
 		// Save user information to the database
 		if err := g.userService.SaveUser(r.Context(), userInfo); err != nil {
 			http.Error(w, "Failed to save user info: "+err.Error(), http.StatusInternalServerError)
 		}
 
-		// Write user info to response
-		w.WriteHeader(http.StatusOK)
-		w.Write(userJSON)
+		json.NewEncoder(w).Encode(user)
 	}
 }
 

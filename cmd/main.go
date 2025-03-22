@@ -91,8 +91,10 @@ func main() {
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedHeaders: []string{"Access-Control-Allow-Origin", "Content-Type"},
+		AllowedOrigins:   []string{"http://localhost:8081", "https://nannyai.harshanu.space"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Access-Control-Allow-Origin", "Content-Type", "Authorization", "Cookie"},
+		AllowCredentials: true,
 	})
 	handler := c.Handler(srv)
 
