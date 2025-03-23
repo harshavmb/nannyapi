@@ -10,9 +10,15 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/generative-ai-go/genai"
+	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
+)
+
+const (
+	Issuer = "https://nannyai.harshanu.space"
 )
 
 // chatRequest represents the request payload for the chat handler
@@ -121,19 +127,20 @@ func sendGeminiFeedbackToClient(w http.ResponseWriter, feedback string) {
 	json.NewEncoder(w).Encode(map[string]string{"feedback": feedback})
 }
 
-func (s *Server) getMaskedAuthToken(r *http.Request, userEmail, encryptionKey string) (*user.AuthToken, error) {
+// Is it really required?
+// func (s *Server) getMaskedAuthToken(r *http.Request, userEmail, encryptionKey string) (*token.Token, error) {
 
-	authToken, err := s.userService.GetAuthToken(r.Context(), userEmail, encryptionKey)
-	if err != nil {
-		if err == context.Canceled {
-			log.Printf("Failed to get auth token: context canceled")
-			return nil, nil // Return nil error and nil auth token
-		}
-		return nil, err // Return nil error as it could be that token is not created yet
-	}
+// 	authToken, err := s.tokenService.GetAllTokens(r.Context(), userEmail, encryptionKey)
+// 	if err != nil {
+// 		if err == context.Canceled {
+// 			log.Printf("Failed to get auth token: context canceled")
+// 			return nil, nil // Return nil error and nil auth token
+// 		}
+// 		return nil, err // Return nil error as it could be that token is not created yet
+// 	}
 
-	return authToken, nil // Return nil error as it could be that token is not created yet
-}
+// 	return authToken, nil // Return nil error as it could be that token is not created yet
+// }
 
 // GetUserInfoFromCookie retrieves user information from the "userinfo" cookie.
 func GetUserInfoFromCookie(r *http.Request) (*user.User, error) {
@@ -154,12 +161,6 @@ func GetUserInfoFromCookie(r *http.Request) (*user.User, error) {
 	}
 
 	return &user, nil
-}
-
-// IsSessionValid checks if the user session is valid.
-func IsSessionValid(r *http.Request) bool {
-	_, err := r.Cookie("userinfo")
-	return err == nil
 }
 
 // IsValidEmail checks if a string is a valid email address
@@ -192,4 +193,47 @@ func IsValidEmail(email string) bool {
 	}
 
 	return true
+}
+
+func generateRefreshToken(ctx context.Context, userID, jwtSecret string) (string, error) {
+	duration := 7 * 24 * time.Hour
+	refreshToken, err := token.GenerateJWT(userID, duration, "refresh", jwtSecret)
+	if err != nil {
+		return "", err
+	}
+	return refreshToken, nil
+}
+
+func (s *Server) deleteRefreshToken(ctx context.Context, tokenString string) error {
+	hashedToken := token.HashToken(tokenString)
+	return s.refreshTokenservice.DeleteRefreshToken(ctx, hashedToken)
+}
+
+func (s *Server) validateRefreshToken(ctx context.Context, tokenString, jwtSecret string) (bool, error) {
+	hashedToken := token.HashToken(tokenString)
+
+	// Validate the refresh token
+	_, err := token.ValidateJWTToken(tokenString, jwtSecret)
+	if err != nil {
+		return false, err
+	}
+	// Check if the token exists in the database and is not revoked
+	refreshToken, err := s.refreshTokenservice.GetRefreshTokenByHashedToken(ctx, hashedToken)
+	if err != nil {
+		return false, err
+	}
+	if refreshToken != nil {
+		// Check if the token is revoked
+		if refreshToken.Revoked {
+			return false, fmt.Errorf("refresh token revoked")
+		}
+
+		// Check if the token has expired
+		if time.Now().After(refreshToken.ExpiresAt) {
+			return false, fmt.Errorf("refresh token expired")
+		}
+
+		return true, nil
+	}
+	return false, nil
 }

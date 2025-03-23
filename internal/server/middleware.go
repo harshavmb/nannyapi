@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -76,12 +77,12 @@ func GetUserFromContext(r *http.Request) (*user.User, bool) {
 	return userInfo, ok
 }
 
-func (s *Server) validateAuthToken(ctx context.Context, token string, encryptionKey string) (*user.User, error) {
+func (s *Server) validateAuthToken(ctx context.Context, tokenString string, encryptionKey string) (*user.User, error) {
 	// Hash the token
-	hashedToken := user.HashToken(token)
+	hashedToken := token.HashToken(tokenString)
 
 	// Retrieve the auth token from the database
-	authToken, err := s.userService.GetAuthTokenByHashedToken(ctx, hashedToken)
+	authToken, err := s.tokenService.GetTokenByHashedToken(ctx, hashedToken)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, fmt.Errorf("auth token not found")
@@ -90,12 +91,12 @@ func (s *Server) validateAuthToken(ctx context.Context, token string, encryption
 	}
 
 	// Decrypt the token
-	decryptedToken, err := user.Decrypt(authToken.Token, encryptionKey)
+	decryptedToken, err := token.Decrypt(authToken.Token, encryptionKey)
 	if err != nil {
 		return nil, err
 	}
 
-	if decryptedToken != token {
+	if decryptedToken != tokenString {
 		return nil, fmt.Errorf("token mismatch")
 	}
 

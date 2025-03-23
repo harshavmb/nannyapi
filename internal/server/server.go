@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/rs/cors"
@@ -23,15 +26,18 @@ import (
 
 // Server represents the HTTP server
 type Server struct {
-	mux               *http.ServeMux
-	geminiClient      *api.GeminiClient
-	githubAuth        *auth.GitHubAuth
-	userService       *user.UserService
-	agentInfoService  *agent.AgentInfoService
-	chatService       *chat.ChatService
-	nannyAPIPort      string
-	nannySwaggerURL   string
-	gitHubRedirectURL string
+	mux                 *http.ServeMux
+	geminiClient        *api.GeminiClient
+	githubAuth          *auth.GitHubAuth
+	userService         *user.UserService
+	agentInfoService    *agent.AgentInfoService
+	chatService         *chat.ChatService
+	tokenService        *token.TokenService
+	refreshTokenservice *token.RefreshTokenService
+	nannyAPIPort        string
+	nannySwaggerURL     string
+	gitHubRedirectURL   string
+	jwtSecret           string
 }
 
 type AuthTokenData struct {
@@ -49,7 +55,7 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 }
 
 // NewServer creates a new Server instance
-func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService) *Server {
+func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, jwtSecret string) *Server {
 	mux := http.NewServeMux()
 
 	// override default nanny API port if NANNY_API_PORT is set
@@ -71,7 +77,7 @@ func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, user
 		gitHubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", nannyAPIPort) // Default GitHubCallback URL
 	}
 
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL}
+	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret}
 	server.routes()
 	return server
 }
@@ -84,12 +90,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL(s.nannySwaggerURL),
 	))
+
+	// GitHub Auth Endpoints
 	s.mux.HandleFunc("/github/login", s.githubAuth.HandleGitHubLogin())
 	s.mux.HandleFunc("/github/callback", s.githubAuth.HandleGitHubCallback())
 	s.mux.HandleFunc("/github/profile", s.githubAuth.HandleGitHubProfile())
 
+	// Token Endpoints
+	s.mux.HandleFunc("POST /api/refresh-token", s.handleRefreshToken())
+
 	// API endoints with token authentication
 	apiMux := http.NewServeMux()
+	//apiMux.HandleFunc("POST /api/auth-token", s.handleCreateAuthToken())
 	apiMux.HandleFunc("/api/auth-tokens", s.handleGetAuthTokens())
 	apiMux.Handle("/api/user-auth-token", s.handleFetchUserInfoFromToken())
 	apiMux.Handle("GET /api/user/{param}", s.handleFetchUserInfo())
@@ -111,8 +123,6 @@ func (s *Server) routes() {
 		AllowCredentials: true,
 	})
 
-	//s.mux.Handle("/api/", s.AuthMiddleware(apiMux))
-
 	// Create a CORS middleware that applies to specific paths
 	corsMiddleware := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +142,42 @@ func (s *Server) routes() {
 	s.mux.Handle("/api/", c.Handler(s.AuthMiddleware(apiMux)))
 	//s.mux.Handle("/", c.Handler(s.AuthMiddleware(http.HandlerFunc(s.handleIndex()))))
 
+}
+
+// HandleRefreshToken handles refresh token requests
+func (s *Server) handleRefreshToken() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Read request body
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+
+		// Unmarshal request body into a map
+		var requestBody map[string]string
+		err = json.Unmarshal(body, &requestBody)
+		if err != nil {
+			http.Error(w, "Failed to unmarshal request body", http.StatusBadRequest)
+			return
+		}
+
+		// Extract refresh token from request body
+		refreshToken, ok := requestBody["refreshToken"]
+		if !ok {
+			http.Error(w, "Refresh token is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate the refresh token
+		isTokenValid, err := s.validateRefreshToken(context.Background(), refreshToken, s.jwtSecret)
+		if err != nil {
+			// check for revoked or expired tokens
+			if err.Error() == "refresh token expired" || err.Error() == "refresh token revoked" {
+				generateRefreshToken(context.Background())
+			}
+		}
+	}
 }
 
 // handleFetchUserInfo handles the fetching of user info from the email/id
@@ -358,7 +404,7 @@ func (s *Server) handleGetAuthTokens() http.HandlerFunc {
 		}
 
 		// Retrieve all auth tokens for the user
-		authTokens, err := s.userService.GetAllAuthTokens(r.Context(), userInfo.Email)
+		authTokens, err := s.tokenService.GetAllTokens(r.Context(), userInfo.Email)
 		if err != nil {
 			log.Printf("Failed to retrieve auth tokens: %v", err)
 			http.Error(w, "Failed to retrieve auth tokens", http.StatusInternalServerError)
@@ -414,7 +460,8 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 		}
 
 		// Delete the auth token
-		err = s.userService.DeleteAuthToken(r.Context(), objID)
+		// won't work needs a fix
+		err = s.tokenService.DeleteToken(r.Context(), objID.String())
 		if err != nil {
 			log.Printf("Failed to delete auth token of user %s: %v", userInfo.Email, err)
 			http.Error(w, "Failed to delete auth token", http.StatusInternalServerError)

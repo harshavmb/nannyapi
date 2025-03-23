@@ -1,4 +1,4 @@
-package user
+package token
 
 import (
 	"crypto/aes"
@@ -8,11 +8,15 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"time"
+
+	"github.com/golang-jwt/jwt"
 )
 
 const (
 	// Alphanumeric characters for token generation
 	alphanumeric = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	Issuer       = "https://nannyai.harshanu.space"
 )
 
 // generateRandomToken generates a random token of the specified length using alphanumeric characters.
@@ -25,6 +29,12 @@ func generateRandomToken(length int) (string, error) {
 		bytes[i] = alphanumeric[b%byte(len(alphanumeric))]
 	}
 	return string(bytes), nil
+}
+
+// hashToken hashes the token using SHA-256.
+func HashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return base64.StdEncoding.EncodeToString(hash[:])
 }
 
 func Encrypt(stringToEncrypt, encryptionKey string) (string, error) {
@@ -111,8 +121,56 @@ func Decrypt(encryptedString string, encryptionKey string) (string, error) {
 	return string(plaintext), nil
 }
 
-// hashToken hashes the token using SHA-256.
-func HashToken(token string) string {
-	hash := sha256.Sum256([]byte(token))
-	return base64.StdEncoding.EncodeToString(hash[:])
+// generateJWT generates both JWT Access & refresh tokens with the given claims
+func GenerateJWT(UserID string, duration time.Duration, tokenType, jwtSecret string) (string, error) {
+	claims := Claims{
+		UserID: UserID,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: time.Now().Unix() + int64(duration.Seconds()),
+			IssuedAt:  time.Now().Unix(),
+			Issuer:    Issuer,
+			Subject:   tokenType, // "access" or "refresh"
+		},
+	}
+
+	if tokenType == "" || jwtSecret == "" {
+		return "", fmt.Errorf("tokenType and jwtSecrets shouldn't be empty")
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		return "", fmt.Errorf("error generating jwt token of type %s for user %s: %v", tokenType, UserID, err)
+	}
+	return tokenString, nil
+}
+
+// validates the JWT token
+func ValidateJWTToken(tokenString, jwtSecret string) (*Claims, error) {
+	claims := &Claims{}
+
+	jwtToken, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		// Validate signing method
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Method.Alg())
+		}
+
+		return []byte(jwtSecret), nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if !jwtToken.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	// Type-assert the token.Claims to *Claims
+	if parsedClaims, ok := jwtToken.Claims.(*Claims); ok {
+		return parsedClaims, nil
+	}
+
+	// If type assertion fails, return an error
+	return nil, fmt.Errorf("failed to parse claims")
 }

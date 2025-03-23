@@ -17,6 +17,7 @@ import (
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/stretchr/testify/assert"
@@ -64,19 +65,22 @@ func setupServer(t *testing.T) (*Server, func(), string) {
 	client, cleanup := setupTestDB(t)
 	//defer cleanup()
 
-	// Create a new User Repository
+	// Create a new Repository objects
 	userRepository := user.NewUserRepository(client.Database(testDBName))
-	authTokenRepository := user.NewAuthTokenRepository(client.Database(testDBName))
+	tokenRepository := token.NewTokenRepository(client.Database(testDBName))
+	refreshTokenRepository := token.NewRefreshTokenRepository(client.Database(testDBName))
 	agentInfoRepository := agent.NewAgentInfoRepository(client.Database(testDBName))
 	ChatRepository := chat.NewChatRepository(client.Database(testDBName))
 
-	// Mock User Service
-	mockUserService := user.NewUserService(userRepository, authTokenRepository)
+	// Mock Services
+	mockUserService := user.NewUserService(userRepository)
 	agentInfoservice := agent.NewAgentInfoService(agentInfoRepository)
 	chatService := chat.NewChatService(ChatRepository, agentInfoservice)
+	mockTokenService := token.NewTokenService(tokenRepository)
+	mockRefreshTokenService := token.NewRefreshTokenService(refreshTokenRepository)
 
 	// Create a new server instance
-	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService)
+	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, "")
 
 	// Create a valid auth token for the test user
 	testUser := &user.User{
@@ -100,12 +104,13 @@ func setupServer(t *testing.T) (*Server, func(), string) {
 	if err != nil {
 		t.Fatalf("Failed to create user: %v", err)
 	}
-	authToken, err := mockUserService.CreateAuthToken(context.Background(), testUser.Email, encryptionKey)
+	tokenString := token.Token{} // just to supress local builds, will be removed
+	authToken, err := mockTokenService.CreateToken(context.Background(), tokenString, encryptionKey)
 	if err != nil {
 		t.Fatalf("Failed to create auth token: %v", err)
 	}
 
-	decryptedToken, err := user.Decrypt(authToken.Token, encryptionKey)
+	decryptedToken, err := token.Decrypt(authToken.Token, encryptionKey)
 	if err != nil {
 		log.Fatalf("Failed to decrypt token: %v", err)
 	}

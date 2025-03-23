@@ -94,60 +94,6 @@ func TestUserRepository(t *testing.T) {
 	})
 }
 
-func TestAuthTokenRepository(t *testing.T) {
-	client, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	repo := NewAuthTokenRepository(client.Database(testDBName))
-
-	t.Run("CreateAuthToken", func(t *testing.T) {
-		authToken := &AuthToken{
-			Email: "test@example.com",
-			Token: "some-token",
-		}
-
-		// Hash the token
-		hashedToken := HashToken(authToken.Token)
-
-		result, err := repo.CreateAuthToken(context.Background(), authToken.Token, authToken.Email, hashedToken)
-		assert.NoError(t, err)
-		assert.NotNil(t, result)
-
-		// Verify the auth token was inserted
-		insertedAuthToken, err := repo.GetAuthTokenByEmail(context.Background(), "test@example.com")
-		assert.NoError(t, err)
-		assert.NotNil(t, insertedAuthToken)
-		assert.Equal(t, "test@example.com", insertedAuthToken.Email)
-	})
-
-	t.Run("GetAuthTokenByEmail", func(t *testing.T) {
-		// Insert an auth token
-		authToken := &AuthToken{
-			Email: "findme@example.com",
-			Token: "some-token",
-		}
-
-		// Hash the token
-		hashedToken := HashToken(authToken.Token)
-
-		_, err := repo.CreateAuthToken(context.Background(), authToken.Token, authToken.Email, hashedToken)
-		assert.NoError(t, err)
-
-		// Find the auth token by email
-		foundAuthToken, err := repo.GetAuthTokenByEmail(context.Background(), "findme@example.com")
-		assert.NoError(t, err)
-		assert.NotNil(t, foundAuthToken)
-		assert.Equal(t, "findme@example.com", foundAuthToken.Email)
-	})
-
-	t.Run("AuthTokenNotFound", func(t *testing.T) {
-		// Try to find a non-existent auth token
-		authToken, err := repo.GetAuthTokenByEmail(context.Background(), "nonexistent@example.com")
-		assert.NoError(t, err)
-		assert.Nil(t, authToken)
-	})
-}
-
 func TestFindUser(t *testing.T) {
 	client, cleanup := setupTestDB(t)
 	defer cleanup()

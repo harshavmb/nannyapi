@@ -92,20 +92,78 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 			return
 		}
 
-		// Store the token in a cookie
-		http.SetCookie(w, &http.Cookie{
-			Name:     "Authorization",
-			Value:    token.AccessToken,
-			Expires:  time.Now().Add(time.Hour),
-			HttpOnly: true,
-			Path:     "/",
-			SameSite: http.SameSiteLaxMode,
-		})
+		client := g.oauthConf.Client(context.Background(), &oauth2.Token{AccessToken: token.AccessToken})
+		resp, err := client.Get("https://api.github.com/user")
+		if err != nil {
+			http.Error(w, "Failed to get user info: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-		url := "http://localhost:8081/dashboard"
+		if resp.StatusCode != http.StatusOK {
+			http.Error(w, "Failed to get user info: "+resp.Status, resp.StatusCode)
+			return
+		}
 
-		// Redirect to the profile page
-		http.Redirect(w, r, url, http.StatusSeeOther)
+		var userInfo map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+			http.Error(w, "Failed to decode user info: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		user := user.User{}
+
+		// Use reflection to dynamically map fields
+		userValue := reflect.ValueOf(&user).Elem()
+		userType := userValue.Type()
+
+		for i := 0; i < userType.NumField(); i++ {
+			field := userType.Field(i)
+			fieldName := field.Name
+			jsonTag := field.Tag.Get("json")
+
+			if jsonTag == "" {
+				continue // Skip fields without a json tag
+			}
+
+			if value, ok := userInfo[jsonTag]; ok {
+				fieldValue := userValue.Field(i)
+
+				if fieldValue.IsValid() && fieldValue.CanSet() && fieldName != "ID" {
+					switch fieldValue.Kind() {
+					case reflect.String:
+						if strValue, ok := value.(string); ok {
+							fieldValue.SetString(strValue)
+						} else {
+							log.Printf("Expected string for field %s, got %T", fieldName, value)
+						}
+					// Add other type conversions as needed (int, bool, etc.)
+					default:
+						log.Printf("Unsupported type for field %s", fieldName)
+					}
+				}
+			}
+		}
+
+		// Fetch email from GitHub API if not already set
+		if user.Email == "" {
+			email, err := fetchEmailFromGitHubAPI(w, client)
+			if err != nil {
+				log.Printf("Failed to fetch email from GitHub API: %v", err)
+			}
+			if email != "" {
+				user.Email = email
+				userInfo["email"] = email
+			} else {
+				log.Printf("No email found for user: %d", user.ID)
+			}
+		}
+
+		// Save user information to the database
+		if err := g.userService.SaveUser(r.Context(), userInfo); err != nil {
+			http.Error(w, "Failed to save user info: "+err.Error(), http.StatusInternalServerError)
+		}
+
+		json.NewEncoder(w).Encode(user)
 	}
 }
 
