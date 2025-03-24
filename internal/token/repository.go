@@ -42,8 +42,8 @@ func (r *TokenRepository) CreateToken(ctx context.Context, token Token) (*Token,
 	return &token, nil
 }
 
-func (r *TokenRepository) GetTokensByEmail(ctx context.Context, userEmail string) ([]*Token, error) {
-	filter := bson.M{"email": userEmail}
+func (r *TokenRepository) GetTokensByUser(ctx context.Context, userID string) ([]*Token, error) {
+	filter := bson.M{"user_id": userID}
 	var tokens []*Token
 	cursor, err := r.collection.Find(ctx, filter)
 	if err != nil {
@@ -124,6 +124,12 @@ func (r *RefreshTokenRepository) CreateRefreshToken(ctx context.Context, token R
 	return &token, nil
 }
 
+func (r *RefreshTokenRepository) UpdateRefreshToken(ctx context.Context, token *RefreshToken) error {
+	filter := bson.M{"token": token.Token}
+	_, err := r.collection.UpdateOne(ctx, filter, bson.M{"$set": token})
+	return err
+}
+
 func (r *RefreshTokenRepository) GetRefreshToken(ctx context.Context, hashedToken string) (*RefreshToken, error) {
 	filter := bson.M{"hashed_token": hashedToken}
 	var token RefreshToken
@@ -150,8 +156,8 @@ func (r *RefreshTokenRepository) DeleteRefreshToken(ctx context.Context, hashedT
 
 // Retrieves all refresh tokens associated with a given user ID.
 // This is useful for user-initiated token revocation (e.g., "log out from all devices").
-func (r *RefreshTokenRepository) GetRefreshTokensByUser(ctx context.Context, email string) ([]*RefreshToken, error) {
-	filter := bson.M{"email": email}
+func (r *RefreshTokenRepository) GetRefreshTokensByUser(ctx context.Context, userID string) ([]*RefreshToken, error) {
+	filter := bson.M{"user_id": userID}
 	var tokens []*RefreshToken
 	cursor, err := r.collection.Find(ctx, filter)
 	if err != nil {

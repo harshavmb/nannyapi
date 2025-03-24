@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
+	"math"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -19,16 +21,13 @@ const (
 	Issuer       = "https://nannyai.harshanu.space"
 )
 
-// generateRandomToken generates a random token of the specified length using alphanumeric characters.
-func generateRandomToken(length int) (string, error) {
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	for i, b := range bytes {
-		bytes[i] = alphanumeric[b%byte(len(alphanumeric))]
-	}
-	return string(bytes), nil
+// GenerateRandomString generates a random string of the specified length using alphanumeric characters.
+// from https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go
+func GenerateRandomString(length int) string {
+	buff := make([]byte, int(math.Ceil(float64(length)/float64(1.33333333333))))
+	rand.Read(buff)
+	str := base64.RawURLEncoding.EncodeToString(buff)
+	return str[:length] // strip 1 extra character we get from odd length results
 }
 
 // hashToken hashes the token using SHA-256.
@@ -149,6 +148,10 @@ func GenerateJWT(UserID string, duration time.Duration, tokenType, jwtSecret str
 func ValidateJWTToken(tokenString, jwtSecret string) (*Claims, error) {
 	claims := &Claims{}
 
+	if tokenString == "" {
+		return nil, fmt.Errorf("token string is empty")
+	}
+
 	jwtToken, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		// Validate signing method
 		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
@@ -159,7 +162,8 @@ func ValidateJWTToken(tokenString, jwtSecret string) (*Claims, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		log.Printf("jwt token validation failed: %v", err)
+		return nil, fmt.Errorf("invalid token")
 	}
 
 	if !jwtToken.Valid {

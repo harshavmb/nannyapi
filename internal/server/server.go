@@ -38,6 +38,7 @@ type Server struct {
 	nannySwaggerURL     string
 	gitHubRedirectURL   string
 	jwtSecret           string
+	nannyEncryptionKey  string
 }
 
 type AuthTokenData struct {
@@ -55,7 +56,7 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 }
 
 // NewServer creates a new Server instance
-func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, jwtSecret string) *Server {
+func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, jwtSecret, nannyEncryptionKey string) *Server {
 	mux := http.NewServeMux()
 
 	// override default nanny API port if NANNY_API_PORT is set
@@ -77,7 +78,7 @@ func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, user
 		gitHubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", nannyAPIPort) // Default GitHubCallback URL
 	}
 
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret}
+	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret, nannyEncryptionKey: nannyEncryptionKey}
 	server.routes()
 	return server
 }
@@ -145,6 +146,17 @@ func (s *Server) routes() {
 }
 
 // HandleRefreshToken handles refresh token requests
+// @Summary Handle refresh token validation, creation and creation of accessTokens too
+// @Description Handle refresh token validation, creation and creation of accessTokens too
+// @Tags refresh-token
+// @Accept json
+// @Produce json
+// @Param refreshToken body string true "Refresh Token"
+// @Success 200 {object} map[string]string "refreshToken and accessToken"
+// @Failure 400 {string} string "Invalid request payload"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 500 {string} string "Failed to create refresh token"
+// @Router /api/refresh-token [post]
 func (s *Server) handleRefreshToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Read request body
@@ -170,17 +182,71 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 		}
 
 		// Validate the refresh token
-		isTokenValid, err := s.validateRefreshToken(context.Background(), refreshToken, s.jwtSecret)
+		var tokenExpired bool
+		_, claims, err := s.validateRefreshToken(context.Background(), refreshToken, s.jwtSecret)
 		if err != nil {
 			// check for revoked or expired tokens
 			if err.Error() == "refresh token expired" || err.Error() == "refresh token revoked" {
-				generateRefreshToken(context.Background())
+				tokenExpired = true
+			} else {
+				http.Error(w, err.Error(), http.StatusUnauthorized)
+				return
 			}
 		}
+
+		// final refresh token
+		var finalRefreshToken string
+
+		if tokenExpired && claims != nil {
+			// Generate a new refresh token
+			finalRefreshToken, err = generateRefreshToken(claims.UserID, s.jwtSecret)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// Save the new refresh token
+			refreshTokenData := &token.RefreshToken{
+				Token:     finalRefreshToken,
+				UserID:    claims.UserID,
+				UserAgent: r.UserAgent(),
+				IPAddress: r.RemoteAddr,
+			}
+			_, err = s.refreshTokenservice.CreateRefreshToken(context.Background(), *refreshTokenData, s.nannyEncryptionKey)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// just use the same refreshToken
+		if !tokenExpired && claims != nil {
+			finalRefreshToken = refreshToken
+		}
+
+		// Generate the new access token
+		accessToken, err := generateAccessToken(claims.UserID, s.jwtSecret)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Prepare response
+		response := map[string]string{
+			"accessToken":  accessToken,
+			"refreshToken": finalRefreshToken,
+		}
+
+		log.Printf("Refresh and access tokens are created for user %s", claims.UserID)
+
+		// Write response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
 	}
 }
 
-// handleFetchUserInfo handles the fetching of user info from the email/id
+// handleFetchUserInfo handles the fetching of user info from the id
 // the request with the following format:
 // Sends a JSOn payload containing the user info to the client with the following format.
 // Response:
@@ -190,11 +256,11 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 //
 // handleFetchUserInfo godoc
 //
-//	@Summary		Fetch user info from email
-//	@Description	Fetch user info from email
+//	@Summary		Fetch user info from id
+//	@Description	Fetch user info from id
 //	@Tags			user-from-email
 //
-// @Param param path string true "Email address/ID of the user"
+// @Param param path string true "ID of the user"
 //
 //	@Produce		json
 //	@Success		200		{object}	[]string
@@ -206,29 +272,22 @@ func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		param := r.PathValue("param")
-
 		var user *user.User
 		var err error
 
-		// Check if the param is a valid email
-		if IsValidEmail(param) {
-			user, err = s.userService.GetUserByEmail(r.Context(), param)
-		} else {
-			// Assume it's an ID and fetch user by ID
-			// Extract user ID from the URL path
-			id := r.PathValue("param")
-			if id == "" {
-				http.Error(w, "Chat ID is required", http.StatusBadRequest)
-				return
-			}
-			userID, err2 := bson.ObjectIDFromHex(id)
-			if err2 != nil {
-				http.Error(w, "Invalid user ID format", http.StatusBadRequest)
-				return
-			}
-			user, err = s.userService.GetUserByID(r.Context(), userID)
+		// Assume it's an ID and fetch user by ID
+		// Extract user ID from the URL path
+		id := r.PathValue("param")
+		if id == "" {
+			http.Error(w, "Chat ID is required", http.StatusBadRequest)
+			return
 		}
+		userID, err := bson.ObjectIDFromHex(id)
+		if err != nil {
+			http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+			return
+		}
+		user, err = s.userService.GetUserByID(r.Context(), userID)
 
 		if err != nil {
 			if err == mongo.ErrNoDocuments {
@@ -269,21 +328,21 @@ func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 //	@Failure		400		{string}    "Bad Request"
 //	@Failure		404		{string}    "Not Found"
 //	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/user-auth-token [get]
+//	@Router			/api/user-auth-token [get]
 func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
-		userInfo, ok := GetUserFromContext(r)
+		userID, ok := GetUserFromContext(r)
 		if !ok {
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}
 
-		log.Printf("User info found in context: %s", userInfo.Email)
+		log.Printf("User info found in context: %s", userID)
 
-		json.NewEncoder(w).Encode(userInfo)
+		json.NewEncoder(w).Encode(userID)
 	}
 }
 
@@ -397,14 +456,14 @@ func (s *Server) handleGetAuthTokens() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
-		userInfo, ok := GetUserFromContext(r)
+		userID, ok := GetUserFromContext(r)
 		if !ok {
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}
 
 		// Retrieve all auth tokens for the user
-		authTokens, err := s.tokenService.GetAllTokens(r.Context(), userInfo.Email)
+		authTokens, err := s.tokenService.GetAllTokens(r.Context(), userID)
 		if err != nil {
 			log.Printf("Failed to retrieve auth tokens: %v", err)
 			http.Error(w, "Failed to retrieve auth tokens", http.StatusInternalServerError)
@@ -439,8 +498,8 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
-		userInfo, _ := GetUserFromContext(r)
-		if userInfo == nil {
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}
@@ -463,7 +522,7 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 		// won't work needs a fix
 		err = s.tokenService.DeleteToken(r.Context(), objID.String())
 		if err != nil {
-			log.Printf("Failed to delete auth token of user %s: %v", userInfo.Email, err)
+			log.Printf("Failed to delete auth token of user %s: %v", userID, err)
 			http.Error(w, "Failed to delete auth token", http.StatusInternalServerError)
 			return
 		}
@@ -490,8 +549,8 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
-		userInfo, _ := GetUserFromContext(r)
-		if userInfo == nil {
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}
@@ -508,7 +567,7 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 			return
 		}
 
-		agentInfo.Email = userInfo.Email
+		agentInfo.UserID = userID
 
 		insertOneResult, err := s.agentInfoService.SaveAgentInfo(r.Context(), agentInfo)
 		if err != nil {
@@ -536,25 +595,29 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to retrieve agents info"
-// @Router /api/agents [post]
+// @Router /api/agents [get]
 func (s *Server) handleAgentInfos() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
-		userInfo, _ := GetUserFromContext(r)
-		if userInfo == nil {
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}
 
-		agents, err := s.agentInfoService.GetAgents(r.Context(), userInfo.Email)
+		agents, err := s.agentInfoService.GetAgents(r.Context(), userID)
 		if err != nil {
 			log.Printf("Failed to retrieve agents info: %v", err)
 			http.Error(w, "Failed to retrieve agents info", http.StatusInternalServerError)
 			return
 		}
 
+		if agents == nil {
+			agents = []*agent.AgentInfo{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(agents)
 	}
 }
@@ -576,8 +639,8 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
-		userInfo, _ := GetUserFromContext(r)
-		if userInfo == nil {
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}
@@ -625,8 +688,8 @@ func (s *Server) handleStartChat() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
-		userInfo, _ := GetUserFromContext(r)
-		if userInfo == nil {
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}
@@ -688,8 +751,8 @@ func (s *Server) handleAddPromptResponse() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
-		userInfo, _ := GetUserFromContext(r)
-		if userInfo == nil {
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}
@@ -742,8 +805,8 @@ func (s *Server) handleGetChatByID() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
-		userInfo, _ := GetUserFromContext(r)
-		if userInfo == nil {
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}

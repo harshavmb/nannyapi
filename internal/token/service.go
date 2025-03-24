@@ -31,15 +31,10 @@ func NewRefreshTokenService(refreshTokenRepo *RefreshTokenRepository) *RefreshTo
 
 // CreateToken creates a static token
 func (s *TokenService) CreateToken(ctx context.Context, token Token, encryptionKey string) (*Token, error) {
-	tokenString, err := generateRandomToken(32)
-	if err != nil {
-		return nil, err
-	}
-
 	// Hash the token
-	hashedToken := HashToken(tokenString)
+	hashedToken := HashToken(token.Token)
 
-	encryptedToken, err := Encrypt(tokenString, encryptionKey)
+	encryptedToken, err := Encrypt(token.Token, encryptionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +45,7 @@ func (s *TokenService) CreateToken(ctx context.Context, token Token, encryptionK
 	token.CreatedAt = time.Now()
 	token.Retrieved = false
 
-	log.Printf("Static token created by user %s", token.Email)
+	log.Printf("Static token created by user %s", token.UserID)
 
 	return s.tokenRepo.CreateToken(ctx, token)
 }
@@ -70,7 +65,7 @@ func (s *TokenService) GetTokenByHashedToken(ctx context.Context, hashedToken st
 		return nil, nil // No static token found
 	}
 
-	log.Printf("Static token fetched by user %s", token.Email)
+	log.Printf("Static token fetched by user %s", token.UserID)
 
 	return token, nil
 }
@@ -83,13 +78,13 @@ func (s *TokenService) DeleteToken(ctx context.Context, hashedToken string) erro
 		return fmt.Errorf("failed to delete static token with hash %s: %v", hashedToken, err)
 	}
 
-	log.Printf("Static token deleted by user %s", hashedToken)
+	log.Printf("Static token  %s deleted", hashedToken)
 	return nil
 }
 
 // GetAllTokens gets all static tokens by a user
-func (s *TokenService) GetAllTokens(context context.Context, email string) ([]*Token, error) {
-	tokens, err := s.tokenRepo.GetTokensByEmail(context, email)
+func (s *TokenService) GetAllTokens(context context.Context, userID string) ([]*Token, error) {
+	tokens, err := s.tokenRepo.GetTokensByUser(context, userID)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, mongo.ErrNoDocuments // No static token found
@@ -102,7 +97,7 @@ func (s *TokenService) GetAllTokens(context context.Context, email string) ([]*T
 	}
 
 	if len(tokens) > 0 {
-		log.Printf("Static tokens fetched by user %s", email)
+		log.Printf("Static tokens fetched by user %s", userID)
 		return tokens, nil
 	}
 	return nil, nil
@@ -110,15 +105,10 @@ func (s *TokenService) GetAllTokens(context context.Context, email string) ([]*T
 
 // CreateRefreshToken creates a refresh token
 func (s *RefreshTokenService) CreateRefreshToken(ctx context.Context, token RefreshToken, encryptionKey string) (*RefreshToken, error) {
-	tokenString, err := generateRandomToken(32)
-	if err != nil {
-		return nil, err
-	}
-
 	// Hash the token
-	hashedToken := HashToken(tokenString)
+	hashedToken := HashToken(token.Token)
 
-	encryptedToken, err := Encrypt(tokenString, encryptionKey)
+	encryptedToken, err := Encrypt(token.Token, encryptionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -129,9 +119,29 @@ func (s *RefreshTokenService) CreateRefreshToken(ctx context.Context, token Refr
 	token.CreatedAt = time.Now()
 	token.ExpiresAt = time.Now().AddDate(0, 0, 7) // 7 days expiry
 
-	log.Printf("Created refresh token for user %s using user agent %s from %s", token.Email, token.UserAgent, token.IPAddress)
+	log.Printf("Created refresh token for user %s using user agent %s from %s", token.UserID, token.UserAgent, token.IPAddress)
 
 	return s.refreshTokenRepo.CreateRefreshToken(ctx, token)
+}
+
+// UpdateRefreshToken updates a refresh token
+// NOT TO BE USED by http handlers, only for testing
+func (s *RefreshTokenService) UpdateRefreshToken(ctx context.Context, token RefreshToken, encryptionKey string) error {
+	// Hash the token
+	hashedToken := HashToken(token.Token)
+
+	encryptedToken, err := Encrypt(token.Token, encryptionKey)
+	if err != nil {
+		return err
+	}
+
+	// set Token object
+	token.Token = encryptedToken
+	token.HashedToken = hashedToken
+
+	log.Printf("Updated refresh token for user %s using user agent %s from %s", token.UserID, token.UserAgent, token.IPAddress)
+
+	return s.refreshTokenRepo.UpdateRefreshToken(ctx, &token)
 }
 
 // GetRefreshTokenByHashedToken retrieves a refresh token by hashed token
@@ -149,9 +159,30 @@ func (s *RefreshTokenService) GetRefreshTokenByHashedToken(ctx context.Context, 
 		return nil, nil // No static token found
 	}
 
-	log.Printf("Refresh token fetched for user %s", token.Email)
+	log.Printf("Refresh token fetched for user %s", token.UserID)
 
 	return token, nil
+}
+
+// GetAllRefreshTokens gets all static tokens by a user
+func (s *RefreshTokenService) GetAllRefreshTokens(context context.Context, userID string) ([]*RefreshToken, error) {
+	tokens, err := s.refreshTokenRepo.GetRefreshTokensByUser(context, userID)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, mongo.ErrNoDocuments // No static token found
+		}
+		return nil, err
+	}
+
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+
+	if len(tokens) > 0 {
+		log.Printf("Refresh tokens fetched by user %s", userID)
+		return tokens, nil
+	}
+	return nil, nil
 }
 
 // DeleteRefreshToken deletes a static token
@@ -159,16 +190,16 @@ func (s *RefreshTokenService) DeleteRefreshToken(ctx context.Context, hashedToke
 	err := s.refreshTokenRepo.DeleteRefreshToken(ctx, hashedToken)
 
 	if err != nil {
-		return fmt.Errorf("failed to delete static token with hash %s: %v", hashedToken, err)
+		return fmt.Errorf("failed to delete refresh token with hash %s: %v", hashedToken, err)
 	}
 
-	log.Printf("Refresh token deleted for user %s", hashedToken)
+	log.Printf("Refresh token %s deleted", hashedToken)
 	return nil
 }
 
 // RevokeAllRefreshTokens gets all static tokens by a user
-func (s *RefreshTokenService) RevokeAllRefreshTokens(context context.Context, email string) error {
-	tokens, err := s.refreshTokenRepo.GetRefreshTokensByUser(context, email)
+func (s *RefreshTokenService) RevokeAllRefreshTokens(context context.Context, userID string) error {
+	tokens, err := s.refreshTokenRepo.GetRefreshTokensByUser(context, userID)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil // No refresh token found, nothing to do
@@ -186,10 +217,10 @@ func (s *RefreshTokenService) RevokeAllRefreshTokens(context context.Context, em
 		for _, token := range tokens {
 			err := s.refreshTokenRepo.DeleteRefreshToken(context, token.HashedToken)
 			if err != nil {
-				return fmt.Errorf("failed to revoke refresh tokens for %s: %v", token.Email, err)
+				return fmt.Errorf("failed to revoke refresh tokens for %s: %v", token.UserID, err)
 			}
 		}
-		log.Printf("Refresh tokens deleted for user %s", email)
+		log.Printf("Refresh tokens deleted for user %s", userID)
 		return nil
 	}
 	return nil

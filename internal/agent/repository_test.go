@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	testDBName         = "test_db3"
+	testDBName         = "test_db"
 	testCollectionName = "agent_info"
 )
 
@@ -26,7 +26,7 @@ func setupTestDB(t *testing.T) (*mongo.Client, func()) {
 
 	// Cleanup function to drop the test database after tests
 	cleanup := func() {
-		err := client.Database(testDBName).Drop(context.Background())
+		err := client.Database(testDBName).Collection(testCollectionName).Drop(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to drop test database: %v", err)
 		}
@@ -47,7 +47,7 @@ func TestAgentInfoRepository(t *testing.T) {
 
 	t.Run("InsertAgentInfo", func(t *testing.T) {
 		agentInfo := &AgentInfo{
-			Email:         "test@example.com",
+			UserID:        "123456",
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -63,13 +63,13 @@ func TestAgentInfoRepository(t *testing.T) {
 		insertedAgentInfo, err := repo.GetAgentInfoByID(context.Background(), result.InsertedID.(bson.ObjectID))
 		assert.NoError(t, err)
 		assert.NotNil(t, insertedAgentInfo)
-		assert.Equal(t, "test@example.com", insertedAgentInfo.Email)
+		assert.Equal(t, agentInfo.UserID, insertedAgentInfo.UserID)
 	})
 
 	t.Run("GetAgentInfoByID", func(t *testing.T) {
 		// Insert agent info
 		agentInfo := &AgentInfo{
-			Email:         "findbyid@example.com",
+			UserID:        "123456",
 			Hostname:      "findbyid-host",
 			IPAddress:     "192.168.1.3",
 			KernelVersion: "5.10.2",
@@ -85,7 +85,7 @@ func TestAgentInfoRepository(t *testing.T) {
 		foundAgentInfo, err := repo.GetAgentInfoByID(context.Background(), agentInfoID)
 		assert.NoError(t, err)
 		assert.NotNil(t, foundAgentInfo)
-		assert.Equal(t, "findbyid@example.com", foundAgentInfo.Email)
+		assert.Equal(t, agentInfo.UserID, foundAgentInfo.UserID)
 	})
 
 	t.Run("AgentInfoNotFoundByID", func(t *testing.T) {
@@ -107,21 +107,21 @@ func TestGetAgents(t *testing.T) {
 		// Insert test agents into the database
 		agents := []AgentInfo{
 			{
-				Email:         "test1@example.com",
+				UserID:        "123456",
 				Hostname:      "host1",
 				IPAddress:     "192.168.1.1",
 				KernelVersion: "5.10.0",
 				OsVersion:     "Ubuntu 24.04",
 			},
 			{
-				Email:         "test1@example.com",
+				UserID:        "123456",
 				Hostname:      "host2",
 				IPAddress:     "192.168.1.2",
 				KernelVersion: "3.10.0",
 				OsVersion:     "Ubuntu 18.04",
 			},
 			{
-				Email:         "test2@example.com",
+				UserID:        "654321",
 				Hostname:      "host3",
 				IPAddress:     "192.168.1.3",
 				KernelVersion: "5.11.0",
@@ -135,15 +135,15 @@ func TestGetAgents(t *testing.T) {
 		}
 
 		// Fetch agents
-		result, err := repo.GetAgents(context.Background(), "test1@example.com")
+		result, err := repo.GetAgents(context.Background(), "123456")
 		assert.NoError(t, err)
 		assert.Len(t, result, 2)
-		assert.Equal(t, "test1@example.com", result[0].Email)
+		assert.Equal(t, "123456", result[0].UserID)
 	})
 
 	t.Run("NoAgents", func(t *testing.T) {
 		// Ensure no agents exist in the database
-		result, err := repo.GetAgents(context.Background(), "nonexistent@email.com")
+		result, err := repo.GetAgents(context.Background(), "000000")
 		assert.NoError(t, err)
 		assert.Empty(t, result)
 	})

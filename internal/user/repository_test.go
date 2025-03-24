@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	testDBName         = "test_db2"
+	testDBName         = "test_db"
 	testCollectionName = "users"
 )
 
@@ -27,7 +27,7 @@ func setupTestDB(t *testing.T) (*mongo.Client, func()) {
 
 	// Cleanup function to drop the test database after tests
 	cleanup := func() {
-		err := client.Database(testDBName).Drop(context.Background())
+		err := client.Database(testDBName).Collection(testDBName).Drop(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to drop test database: %v", err)
 		}

@@ -121,7 +121,7 @@
             }
         },
         "/api/agents": {
-            "post": {
+            "get": {
                 "description": "Ingest agent information",
                 "consumes": [
                     "application/json"
@@ -387,25 +387,71 @@
                 }
             }
         },
-        "/api/user/{param}": {
-            "get": {
-                "description": "Fetch user info from email",
+        "/api/refresh-token": {
+            "post": {
+                "description": "Handle refresh token validation, creation and creation of accessTokens too",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "user-from-email"
+                    "refresh-token"
                 ],
-                "summary": "Fetch user info from email",
+                "summary": "Handle refresh token validation, creation and creation of accessTokens too",
                 "parameters": [
                     {
-                        "type": "string",
-                        "description": "Email address/ID of the user",
-                        "name": "param",
-                        "in": "path",
-                        "required": true
+                        "description": "Refresh Token",
+                        "name": "refreshToken",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
+                "responses": {
+                    "200": {
+                        "description": "refreshToken and accessToken",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to create refresh token",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/user-auth-token": {
+            "get": {
+                "description": "Fetch user info from auth token",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-tokens"
+                ],
+                "summary": "Fetch user info from auth token",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -437,19 +483,43 @@
                 }
             }
         },
-        "/auth-tokens": {
+        "/api/user/{param}": {
             "get": {
-                "description": "Serves the auth tokens page.",
+                "description": "Fetch user info from id",
                 "produces": [
-                    "text/html"
+                    "application/json"
                 ],
                 "tags": [
-                    "auth-tokens"
+                    "user-from-email"
                 ],
-                "summary": "Get auth tokens page",
+                "summary": "Fetch user info from id",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID of the user",
+                        "name": "param",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Successfully served auth tokens page",
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "string"
                         }
@@ -555,47 +625,6 @@
                     }
                 }
             }
-        },
-        "/user-auth-token": {
-            "get": {
-                "description": "Fetch user info from auth token",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth-tokens"
-                ],
-                "summary": "Fetch user info from auth token",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
         }
     },
     "definitions": {
@@ -603,9 +632,6 @@
             "type": "object",
             "properties": {
                 "created_at": {
-                    "type": "string"
-                },
-                "email": {
                     "type": "string"
                 },
                 "hostname": {
@@ -621,6 +647,9 @@
                     "type": "string"
                 },
                 "os_version": {
+                    "type": "string"
+                },
+                "user_id": {
                     "type": "string"
                 }
             }

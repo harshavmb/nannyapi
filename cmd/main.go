@@ -61,6 +61,7 @@ func main() {
 	if os.Getenv("NANNY_ENCRYPTION_KEY") == "" {
 		log.Fatalf("NANNY_ENCRYPTION_KEY not set")
 	}
+	nannyEncryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
 
 	// Check if JWT_SECRET is present in env vars
 	if os.Getenv("JWT_SECRET") == "" {
@@ -97,7 +98,7 @@ func main() {
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
 
 	// Create server with Gemini client
-	srv := server.NewServer(geminiClient, githubAuth, userService, agentService, chatService, tokenService, refreshTokenService, jwtSecret)
+	srv := server.NewServer(geminiClient, githubAuth, userService, agentService, chatService, tokenService, refreshTokenService, jwtSecret, nannyEncryptionKey)
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{

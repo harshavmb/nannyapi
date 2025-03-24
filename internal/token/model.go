@@ -9,7 +9,7 @@ import (
 // Token struct for static tokens (already defined)
 type Token struct {
 	ID          bson.ObjectID `json:"id" bson:"_id,omitempty"`
-	Email       string        `json:"email" bson:"email"`
+	UserID      string        `json:"user_id" bson:"user_id"`
 	Token       string        `bson:"token" json:"token"`
 	HashedToken string        `bson:"hashed_token" json:"hashed_token"`
 	CreatedAt   time.Time     `bson:"created_at" json:"created_at"`
@@ -19,8 +19,8 @@ type Token struct {
 // RefreshToken struct for refresh tokens (store in database)
 type RefreshToken struct {
 	ID          bson.ObjectID `json:"id" bson:"_id,omitempty"`
-	Email       string        `json:"email" bson:"email"` // Link to user
-	Token       string        `bson:"token" json:"token"` // The refresh token itself (encrypted or hashed)
+	UserID      string        `json:"user_id" bson:"user_id"` // Link to user
+	Token       string        `bson:"token" json:"token"`     // The refresh token itself (encrypted or hashed)
 	HashedToken string        `bson:"hashed_token" json:"hashed_token"`
 	ExpiresAt   time.Time     `bson:"expires_at" json:"expires_at"`
 	CreatedAt   time.Time     `bson:"created_at" json:"created_at"`
@@ -34,7 +34,6 @@ type RefreshToken struct {
 // the data that is inside the access token when it is parsed.
 type AccessTokenClaims struct {
 	UserID    bson.ObjectID `json:"user_id"`
-	Email     string        `json:"email"`
 	IsAgent   bool          `json:"is_agent,omitempty"`
 	ExpiresAt time.Time     `json:"exp"`
 	IssuedAt  time.Time     `json:"iat"`

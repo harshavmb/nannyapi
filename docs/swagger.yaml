@@ -3,8 +3,6 @@ definitions:
     properties:
       created_at:
         type: string
-      email:
-        type: string
       hostname:
         type: string
       id:
@@ -14,6 +12,8 @@ definitions:
       kernel_version:
         type: string
       os_version:
+        type: string
+      user_id:
         type: string
     type: object
   chat.Chat:
@@ -152,7 +152,7 @@ paths:
       tags:
       - agent-info
   /api/agents:
-    post:
+    get:
       consumes:
       - application/json
       description: Ingest agent information
@@ -327,11 +327,76 @@ paths:
       summary: Add a prompt-response pair to a chat session
       tags:
       - chat
+  /api/refresh-token:
+    post:
+      consumes:
+      - application/json
+      description: Handle refresh token validation, creation and creation of accessTokens
+        too
+      parameters:
+      - description: Refresh Token
+        in: body
+        name: refreshToken
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: refreshToken and accessToken
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            type: string
+        "401":
+          description: User not authenticated
+          schema:
+            type: string
+        "500":
+          description: Failed to create refresh token
+          schema:
+            type: string
+      summary: Handle refresh token validation, creation and creation of accessTokens
+        too
+      tags:
+      - refresh-token
+  /api/user-auth-token:
+    get:
+      description: Fetch user info from auth token
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      summary: Fetch user info from auth token
+      tags:
+      - auth-tokens
   /api/user/{param}:
     get:
-      description: Fetch user info from email
+      description: Fetch user info from id
       parameters:
-      - description: Email address/ID of the user
+      - description: ID of the user
         in: path
         name: param
         required: true
@@ -357,26 +422,9 @@ paths:
           description: Internal Server Error
           schema:
             type: string
-      summary: Fetch user info from email
+      summary: Fetch user info from id
       tags:
       - user-from-email
-  /auth-tokens:
-    get:
-      description: Serves the auth tokens page.
-      produces:
-      - text/html
-      responses:
-        "200":
-          description: Successfully served auth tokens page
-          schema:
-            type: string
-        "500":
-          description: Internal Server Error
-          schema:
-            type: string
-      summary: Get auth tokens page
-      tags:
-      - auth-tokens
   /chat:
     post:
       consumes:
@@ -438,31 +486,4 @@ paths:
       summary: Status of the API
       tags:
       - status
-  /user-auth-token:
-    get:
-      description: Fetch user info from auth token
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              type: string
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            type: string
-        "404":
-          description: Not Found
-          schema:
-            type: string
-        "500":
-          description: Internal Server Error
-          schema:
-            type: string
-      summary: Fetch user info from auth token
-      tags:
-      - auth-tokens
 swagger: "2.0"
