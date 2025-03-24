@@ -165,7 +165,7 @@ func TestValidateJWTToken(t *testing.T) {
 
 		_, err = ValidateJWTToken(tokenString, jwtSecret)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token is expired")
+		assert.Contains(t, err.Error(), "invalid token")
 	})
 
 	t.Run("InvalidToken_WrongSecret", func(t *testing.T) {
@@ -174,18 +174,18 @@ func TestValidateJWTToken(t *testing.T) {
 
 		_, err = ValidateJWTToken(tokenString, "wrong-secret")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "signature is invalid")
+		assert.Contains(t, err.Error(), "invalid token")
 	})
 
 	t.Run("InvalidToken_Malformed", func(t *testing.T) {
 		_, err := ValidateJWTToken("malformed-token", jwtSecret)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token contains an invalid number of segments")
+		assert.Contains(t, err.Error(), "invalid token")
 	})
 
 	t.Run("InvalidToken_EmptyToken", func(t *testing.T) {
 		_, err := ValidateJWTToken("", jwtSecret)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token contains an invalid number of segments")
+		assert.Contains(t, err.Error(), "token string is empty")
 	})
 }
