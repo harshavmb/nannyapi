@@ -1005,9 +1005,13 @@ func TestHandleRefreshToken(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Create a request with the valid refresh token
-		reqBody := fmt.Sprintf(`{"refreshToken":"%s"}`, tokenString)
-		req, err := http.NewRequest("POST", "/api/refresh-token", strings.NewReader(reqBody))
+		req, err := http.NewRequest("POST", "/api/refresh-token", nil)
 		assert.NoError(t, err)
+		req.AddCookie(&http.Cookie{
+			Name:     "refresh_token",
+			Value:    tokenString,
+			HttpOnly: true,
+		})
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1017,8 +1021,8 @@ func TestHandleRefreshToken(t *testing.T) {
 		var response map[string]string
 		err = json.NewDecoder(recorder.Body).Decode(&response)
 		assert.NoError(t, err)
-		assert.NotEmpty(t, response["accessToken"])
-		assert.NotEmpty(t, response["refreshToken"])
+		assert.NotEmpty(t, response["access_token"])
+		assert.NotEmpty(t, response["refresh_token"])
 		assert.Equal(t, token.HashToken(tokenString), refreshToken.HashedToken)
 	})
 
@@ -1058,9 +1062,13 @@ func TestHandleRefreshToken(t *testing.T) {
 		}
 
 		// Create a request with the expired refresh token
-		reqBody := fmt.Sprintf(`{"refreshToken":"%s"}`, tokenString)
-		req, err := http.NewRequest("POST", "/api/refresh-token", strings.NewReader(reqBody))
+		req, err := http.NewRequest("POST", "/api/refresh-token", nil)
 		assert.NoError(t, err)
+		req.AddCookie(&http.Cookie{
+			Name:     "refresh_token",
+			Value:    tokenString,
+			HttpOnly: true,
+		})
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1070,15 +1078,19 @@ func TestHandleRefreshToken(t *testing.T) {
 		var response map[string]string
 		err = json.NewDecoder(recorder.Body).Decode(&response)
 		assert.NoError(t, err)
-		assert.NotEmpty(t, response["accessToken"])
-		assert.NotEmpty(t, response["refreshToken"])
+		assert.NotEmpty(t, response["access_token"])
+		assert.NotEmpty(t, response["refresh_token"])
 	})
 
 	t.Run("InvalidRefreshToken", func(t *testing.T) {
 		// Create a request with an invalid refresh token
-		reqBody := `{"refreshToken":"invalid-token"}`
-		req, err := http.NewRequest("POST", "/api/refresh-token", strings.NewReader(reqBody))
+		req, err := http.NewRequest("POST", "/api/refresh-token", nil)
 		assert.NoError(t, err)
+		req.AddCookie(&http.Cookie{
+			Name:     "refresh_token",
+			Value:    "invalid-token",
+			HttpOnly: true,
+		})
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1092,8 +1104,7 @@ func TestHandleRefreshToken(t *testing.T) {
 
 	t.Run("MissingRefreshToken", func(t *testing.T) {
 		// Create a request without a refresh token
-		reqBody := `{}`
-		req, err := http.NewRequest("POST", "/api/refresh-token", strings.NewReader(reqBody))
+		req, err := http.NewRequest("POST", "/api/refresh-token", nil)
 		assert.NoError(t, err)
 
 		recorder := httptest.NewRecorder()

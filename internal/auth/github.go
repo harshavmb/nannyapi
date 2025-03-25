@@ -12,15 +12,19 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"golang.org/x/oauth2"
 	githubOAuth2 "golang.org/x/oauth2/github"
 )
 
 type GitHubAuth struct {
-	oauthConf   *oauth2.Config
-	randSrc     io.Reader
-	userService *user.UserService
+	oauthConf           *oauth2.Config
+	randSrc             io.Reader
+	userService         *user.UserService
+	refreshTokenService *token.RefreshTokenService
+	nannyEncryptionKey  string
+	jwtSecret           string
 }
 
 func (g *GitHubAuth) generateStateString() (string, error) {
@@ -42,7 +46,7 @@ func (g *GitHubAuth) generateStateString() (string, error) {
 // The "Authorization callback URL" you set there must match the redirect URL
 // you use in your code.  For local testing, something like
 // "http://localhost:8080/github/callback" is typical.
-func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user.UserService) *GitHubAuth {
+func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user.UserService, refreshTokenService *token.RefreshTokenService, nannyEncryptionKey, jwtSecret string) *GitHubAuth {
 	return &GitHubAuth{
 		oauthConf: &oauth2.Config{
 			ClientID:     clientID,
@@ -51,8 +55,11 @@ func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user
 			Scopes:       []string{"user:email"},
 			Endpoint:     githubOAuth2.Endpoint,
 		},
-		randSrc:     rand.Reader,
-		userService: userService,
+		randSrc:             rand.Reader,
+		userService:         userService,
+		refreshTokenService: refreshTokenService,
+		nannyEncryptionKey:  nannyEncryptionKey,
+		jwtSecret:           jwtSecret,
 	}
 }
 
@@ -92,97 +99,49 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 			return
 		}
 
-		client := g.oauthConf.Client(context.Background(), &oauth2.Token{AccessToken: token.AccessToken})
-		resp, err := client.Get("https://api.github.com/user")
-		if err != nil {
-			http.Error(w, "Failed to get user info: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
+		// Store the token in a cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "GH_Authorization",
+			Value:    token.AccessToken,
+			Expires:  time.Now().Add(time.Hour),
+			HttpOnly: true,
+			Path:     "/",
+			SameSite: http.SameSiteLaxMode,
+		})
 
-		if resp.StatusCode != http.StatusOK {
-			http.Error(w, "Failed to get user info: "+resp.Status, resp.StatusCode)
-			return
-		}
-
-		var userInfo map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
-			http.Error(w, "Failed to decode user info: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		user := user.User{}
-
-		// Use reflection to dynamically map fields
-		userValue := reflect.ValueOf(&user).Elem()
-		userType := userValue.Type()
-
-		for i := 0; i < userType.NumField(); i++ {
-			field := userType.Field(i)
-			fieldName := field.Name
-			jsonTag := field.Tag.Get("json")
-
-			if jsonTag == "" {
-				continue // Skip fields without a json tag
-			}
-
-			if value, ok := userInfo[jsonTag]; ok {
-				fieldValue := userValue.Field(i)
-
-				if fieldValue.IsValid() && fieldValue.CanSet() && fieldName != "ID" {
-					switch fieldValue.Kind() {
-					case reflect.String:
-						if strValue, ok := value.(string); ok {
-							fieldValue.SetString(strValue)
-						} else {
-							log.Printf("Expected string for field %s, got %T", fieldName, value)
-						}
-					// Add other type conversions as needed (int, bool, etc.)
-					default:
-						log.Printf("Unsupported type for field %s", fieldName)
-					}
-				}
-			}
-		}
-
-		// Fetch email from GitHub API if not already set
-		if user.Email == "" {
-			email, err := fetchEmailFromGitHubAPI(w, client)
-			if err != nil {
-				log.Printf("Failed to fetch email from GitHub API: %v", err)
-			}
-			if email != "" {
-				user.Email = email
-				userInfo["email"] = email
-			} else {
-				log.Printf("No email found for user: %d", user.ID)
-			}
-		}
-
-		// Save user information to the database
-		if err := g.userService.SaveUser(r.Context(), userInfo); err != nil {
-			http.Error(w, "Failed to save user info: "+err.Error(), http.StatusInternalServerError)
-		}
-
-		json.NewEncoder(w).Encode(user)
+		// Redirect to the profile page
+		//http.Redirect(w, r, "/github/profile", http.StatusSeeOther)
+		http.Redirect(w, r, "http://localhost:8081/dashboard", http.StatusSeeOther)
 	}
 }
 
 func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		tokenCookie, err := r.Cookie("Authorization")
+		tokenCookie, err := r.Cookie("GH_Authorization")
 		if err != nil {
-			http.Error(w, "Authorization cookie missing", http.StatusUnauthorized)
+			http.Error(w, "GitHub Authorization cookie missing", http.StatusUnauthorized)
 			return
 		}
 
-		// Check if user info is already in the cookie
-		userCookie, err := r.Cookie("userinfo")
-		if err == nil && userCookie.Value != "" {
-			// User info found in cookie, redirect to index
-			redirectURL := "/"
-			http.Redirect(w, r, redirectURL, http.StatusSeeOther)
-			return
+		// Check for the presence of the refresh_token cookie
+		refreshTokenCookie, err := r.Cookie("refresh_token")
+		if err == nil {
+			// Validate the existing refresh token
+			_, err := token.ValidateJWTToken(refreshTokenCookie.Value, g.jwtSecret)
+			if err == nil {
+				// Reuse the existing refresh token if valid
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				// Return tokens and user info
+				refreshTokenResponse := map[string]interface{}{
+					"refresh_token": refreshTokenCookie.Value,
+				}
+				json.NewEncoder(w).Encode(refreshTokenResponse)
+				return // we don't execute further to avoid more DB calls
+			} else {
+				log.Printf("Existing refresh token is invalid: %v", err)
+			}
 		}
 
 		client := g.oauthConf.Client(context.Background(), &oauth2.Token{AccessToken: tokenCookie.Value})
@@ -207,6 +166,7 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 		user := user.User{}
 
 		// Use reflection to dynamically map fields
+		// TO-DO, find a better way to set user than reflection
 		userValue := reflect.ValueOf(&user).Elem()
 		userType := userValue.Type()
 
@@ -257,7 +217,59 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			http.Error(w, "Failed to save user info: "+err.Error(), http.StatusInternalServerError)
 		}
 
-		json.NewEncoder(w).Encode(user)
+		// Fetch the userID
+		userByEmail, err := g.userService.GetUserByEmail(context.Background(), user.Email)
+		if err != nil {
+			http.Error(w, "Failed to fetch user info by email: "+err.Error(), http.StatusInternalServerError)
+		}
+		userID := userByEmail.ID.Hex()
+
+		// Generate Acccess and Refresh Tokens
+		refreshToken, err := token.GenerateJWT(userID, 7*24*time.Hour, "refresh", g.jwtSecret)
+		if err != nil {
+			http.Error(w, "Failed to generate refresh token: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Save the new refresh token in database
+		refreshTokenData := &token.RefreshToken{
+			Token:     refreshToken,
+			UserID:    userID,
+			UserAgent: r.UserAgent(),
+			IPAddress: r.RemoteAddr,
+		}
+		_, err = g.refreshTokenService.CreateRefreshToken(context.Background(), *refreshTokenData, g.nannyEncryptionKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		accessToken, err := token.GenerateJWT(userID, 15*time.Minute, "access", g.jwtSecret)
+		if err != nil {
+			http.Error(w, "Failed to generate access token: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Return tokens and user info
+		response := map[string]interface{}{
+			"user":          user,
+			"access_token":  accessToken,
+			"refresh_token": refreshToken,
+		}
+
+		// Store the refresh_token in a http-only cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "refresh_token",
+			Value:    refreshToken,
+			Expires:  time.Now().Add(7 * 24 * time.Hour),
+			HttpOnly: true,
+			Path:     "/",
+			SameSite: http.SameSiteLaxMode,
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
 	}
 }
 

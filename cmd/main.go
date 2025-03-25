@@ -95,7 +95,7 @@ func main() {
 	if githubRedirectURL == "" {
 		githubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", port)
 	}
-	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
+	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService, refreshTokenService, nannyEncryptionKey, jwtSecret)
 
 	// Create server with Gemini client
 	srv := server.NewServer(geminiClient, githubAuth, userService, agentService, chatService, tokenService, refreshTokenService, jwtSecret, nannyEncryptionKey)

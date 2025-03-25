@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -159,27 +158,13 @@ func (s *Server) routes() {
 // @Router /api/refresh-token [post]
 func (s *Server) handleRefreshToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Read request body
-		body, err := io.ReadAll(r.Body)
+		// Retrieve refresh token from cookies
+		cookie, err := r.Cookie("refresh_token")
 		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
-			return
-		}
-
-		// Unmarshal request body into a map
-		var requestBody map[string]string
-		err = json.Unmarshal(body, &requestBody)
-		if err != nil {
-			http.Error(w, "Failed to unmarshal request body", http.StatusBadRequest)
-			return
-		}
-
-		// Extract refresh token from request body
-		refreshToken, ok := requestBody["refreshToken"]
-		if !ok {
 			http.Error(w, "Refresh token is required", http.StatusBadRequest)
 			return
 		}
+		refreshToken := cookie.Value
 
 		// Validate the refresh token
 		var tokenExpired bool
@@ -233,8 +218,8 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 
 		// Prepare response
 		response := map[string]string{
-			"accessToken":  accessToken,
-			"refreshToken": finalRefreshToken,
+			"access_token":  accessToken,
+			"refresh_token": finalRefreshToken,
 		}
 
 		log.Printf("Refresh and access tokens are created for user %s", claims.UserID)
