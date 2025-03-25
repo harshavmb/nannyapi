@@ -190,12 +190,14 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 				return
 			}
 
+			ipAddress := strings.Split(r.RemoteAddr, ":")
+
 			// Save the new refresh token
 			refreshTokenData := &token.RefreshToken{
 				Token:     finalRefreshToken,
 				UserID:    claims.UserID,
 				UserAgent: r.UserAgent(),
-				IPAddress: r.RemoteAddr,
+				IPAddress: ipAddress[0],
 			}
 			_, err = s.refreshTokenservice.CreateRefreshToken(context.Background(), *refreshTokenData, s.nannyEncryptionKey)
 			if err != nil {

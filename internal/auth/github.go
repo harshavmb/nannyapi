@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/harshavmb/nannyapi/internal/token"
@@ -231,12 +232,14 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			return
 		}
 
+		ipAddress := strings.Split(r.RemoteAddr, ":")
+
 		// Save the new refresh token in database
 		refreshTokenData := &token.RefreshToken{
 			Token:     refreshToken,
 			UserID:    userID,
 			UserAgent: r.UserAgent(),
-			IPAddress: r.RemoteAddr,
+			IPAddress: ipAddress[0],
 		}
 		_, err = g.refreshTokenService.CreateRefreshToken(context.Background(), *refreshTokenData, g.nannyEncryptionKey)
 		if err != nil {
