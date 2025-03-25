@@ -77,8 +77,6 @@ The application relies on environment variables for configuration. You can set t
 *   `PORT`: The port the server listens on. Defaults to `8080`.
 *   `GH_REDIRECT_URL`: The URL to redirect to after GitHub authentication. Defaults to `http://localhost:8080/github/callback`.
 *   `SWAGGER_DOC_URL`: The URL to the Swagger documentation. Defaults to `http://localhost:8080/swagger/doc.json`.
-*   `NANNY_TEMPLATE_PATH`: Path to the index.html template. Defaults to 
-index.html.
 
 ### Running the Application
 

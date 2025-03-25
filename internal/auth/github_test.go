@@ -2,97 +2,158 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
-	"github.com/harshavmb/nannyapi/internal/user"
 	"golang.org/x/oauth2"
+	githubOAuth2 "golang.org/x/oauth2/github"
 )
 
-type mockUserService struct {
-	user.UserService
-	saveUserErr error
+// MockOAuth2Config is a mock implementation of oauth2.Config
+type MockOAuth2Config struct {
+	oauth2.Config
+	ExchangeFunc func(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error)
 }
 
-func (m *mockUserService) SaveUser(ctx context.Context, userInfo map[string]interface{}) error {
-	return m.saveUserErr
+// Override the Exchange method for mocking
+func (m *MockOAuth2Config) Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+	if m.ExchangeFunc != nil {
+		return m.ExchangeFunc(ctx, code, opts...)
+	}
+	return nil, fmt.Errorf("mock Exchange not implemented")
 }
 
-func TestHandleGitHubProfile(t *testing.T) {
-	tests := []struct {
-		name            string
-		authCookie      *http.Cookie
-		userInfoCookie  *http.Cookie
-		mockUserService *mockUserService
-		expectedStatus  int
-	}{
-		{
-			name:            "Missing authorization cookie",
-			authCookie:      nil,
-			userInfoCookie:  nil,
-			mockUserService: &mockUserService{},
-			expectedStatus:  http.StatusUnauthorized,
-		},
-		{
-			name:            "Valid authorization cookie but missing user info cookie",
-			authCookie:      &http.Cookie{Name: "Authorization", Value: "valid-token"},
-			userInfoCookie:  nil,
-			mockUserService: &mockUserService{},
-			expectedStatus:  http.StatusUnauthorized,
-		},
-		{
-			name:            "Valid authorization and user info cookies",
-			authCookie:      &http.Cookie{Name: "Authorization", Value: "valid-token"},
-			userInfoCookie:  &http.Cookie{Name: "userinfo", Value: `{"email":"test@example.com","name":"Test User"}`},
-			mockUserService: &mockUserService{},
-			expectedStatus:  http.StatusSeeOther,
-		},
-		{
-			name:            "Error fetching user info from GitHub",
-			authCookie:      &http.Cookie{Name: "Authorization", Value: "invalid-token"},
-			userInfoCookie:  nil,
-			mockUserService: &mockUserService{},
-			expectedStatus:  http.StatusUnauthorized,
-		},
-		{
-			name:            "Error saving user info to the database",
-			authCookie:      &http.Cookie{Name: "Authorization", Value: "valid-token"},
-			userInfoCookie:  nil,
-			mockUserService: &mockUserService{saveUserErr: fmt.Errorf("database error")},
-			expectedStatus:  http.StatusUnauthorized,
+// Helper function to check if a string contains a substring
+func contains(str, substr string) bool {
+	return len(str) >= len(substr) && str[:len(substr)] == substr
+}
+
+// Test for HandleGitHubLogin
+func TestHandleGitHubLogin(t *testing.T) {
+	// Initialize GitHubAuth with environment variables
+	githubAuth := &GitHubAuth{
+		oauthConf: &oauth2.Config{
+			ClientID:     os.Getenv("GH_CLIENT_ID"),
+			ClientSecret: os.Getenv("GH_CLIENT_SECRET"),
+			RedirectURL:  "http://localhost:8080/github/callback",
+			Scopes:       []string{"user:email"},
+			Endpoint:     githubOAuth2.Endpoint,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := &GitHubAuth{
-				oauthConf:   &oauth2.Config{},
-				userService: &tt.mockUserService.UserService,
-			}
+	// Create a test HTTP request and response recorder
+	req := httptest.NewRequest(http.MethodGet, "/github/login", nil)
+	rec := httptest.NewRecorder()
 
-			req := httptest.NewRequest("GET", "/github/profile", nil)
-			if tt.authCookie != nil {
-				req.AddCookie(tt.authCookie)
-			}
-			if tt.userInfoCookie != nil {
-				// Properly encode the userinfo cookie value
-				userInfoJSON, _ := json.Marshal(tt.userInfoCookie)
-				req.AddCookie(&http.Cookie{
-					Name:  "userinfo",
-					Value: string(userInfoJSON),
-				})
-			}
+	// Call the handler
+	handler := githubAuth.HandleGitHubLogin()
+	handler.ServeHTTP(rec, req)
 
-			rr := httptest.NewRecorder()
-			handler := g.HandleGitHubProfile()
-			handler.ServeHTTP(rr, req)
+	// Assert the response status code
+	if rec.Code != http.StatusSeeOther {
+		t.Errorf("Expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
 
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+	// Assert the `oauthstate` cookie is set
+	cookies := rec.Result().Cookies()
+	found := false
+	for _, cookie := range cookies {
+		if cookie.Name == "oauthstate" {
+			found = true
+			if cookie.Expires.Before(time.Now()) {
+				t.Errorf("oauthstate cookie has expired")
 			}
-		})
+			break
+		}
+	}
+	if !found {
+		t.Errorf("oauthstate cookie not set")
+	}
+
+	// Assert the redirect URL
+	location := rec.Header().Get("Location")
+	if location == "" {
+		t.Errorf("Redirect URL not set")
+	}
+	if !contains(location, "https://github.com/login/oauth/authorize") {
+		t.Errorf("Redirect URL does not contain GitHub authorization endpoint")
 	}
 }
+
+// TO-DO to be added later (no iead how to do that)
+// Test for HandleGitHubCallback
+// func TestHandleGitHubCallback(t *testing.T) {
+// 	// Mock the OAuth2 Config
+// 	mockConfig := &MockOAuth2Config{
+// 		Config: oauth2.Config{
+// 			ClientID:     os.Getenv("GH_CLIENT_ID"),
+// 			ClientSecret: os.Getenv("GH_CLIENT_SECRET"),
+// 			RedirectURL:  "http://localhost:8080/github/callback",
+// 			Scopes:       []string{"user:email"},
+// 			Endpoint:     githubOAuth2.Endpoint,
+// 		},
+// 		ExchangeFunc: func(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+// 			if code != "mock-code" {
+// 				return nil, fmt.Errorf("invalid code")
+// 			}
+// 			return &oauth2.Token{
+// 				AccessToken: "mock-access-token",
+// 				Expiry:      time.Now().Add(1 * time.Hour),
+// 			}, nil
+// 		},
+// 	}
+
+// 	// Initialize GitHubAuth with the mock config
+// 	githubAuth := &GitHubAuth{
+// 		oauthConf: &mockConfig.Config, // Correctly assign the mock config
+// 	}
+
+// 	githubAuth.oauthConf = &mockConfig.Config // Correctly assign the mock config
+
+// 	// Create a test HTTP request with a valid state and code
+// 	req := httptest.NewRequest(http.MethodGet, "/github/callback?code=mock-code", nil)
+// 	req.AddCookie(&http.Cookie{
+// 		Name:     "oauthstate",
+// 		Value:    "mock-state",
+// 		Expires:  time.Now().Add(1 * time.Hour),
+// 		HttpOnly: true,
+// 	})
+
+// 	// Create a response recorder
+// 	rec := httptest.NewRecorder()
+
+// 	// Call the handler
+// 	handler := githubAuth.HandleGitHubCallback()
+// 	handler.ServeHTTP(rec, req)
+
+// 	// Assert the response status code
+// 	if rec.Code != http.StatusSeeOther {
+// 		t.Errorf("Expected status %d, got %d", http.StatusSeeOther, rec.Code)
+// 	}
+
+// 	// Assert the `Authorization` cookie is set
+// 	cookies := rec.Result().Cookies()
+// 	found := false
+// 	for _, cookie := range cookies {
+// 		if cookie.Name == "Authorization" {
+// 			found = true
+// 			if cookie.Expires.Before(time.Now()) {
+// 				t.Errorf("Authorization cookie has expired")
+// 			}
+// 			break
+// 		}
+// 	}
+// 	if !found {
+// 		t.Errorf("Authorization cookie not set")
+// 	}
+
+// 	// Assert the redirect URL
+// 	location := rec.Header().Get("Location")
+// 	if location != "/github/profile" {
+// 		t.Errorf("Expected redirect to /github/profile, got %s", location)
+// 	}
+// }

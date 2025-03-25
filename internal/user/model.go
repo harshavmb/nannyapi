@@ -21,15 +21,6 @@ type GitHubEmail struct {
 	Verified bool   `json:"verified"`
 }
 
-type AuthToken struct {
-	ID          bson.ObjectID `json:"id" bson:"_id,omitempty"`
-	Email       string        `json:"email" bson:"email"`
-	Token       string        `bson:"token" json:"token"`
-	HashedToken string        `bson:"hashed_token" json:"hashed_token"`
-	CreatedAt   time.Time     `bson:"created_at" json:"created_at"`
-	Retrieved   bool          `bson:"retrieved" json:"retrieved"`
-}
-
 // AgentInfo represents the information ingested by the agent
 type AgentInfo struct {
 	ID            bson.ObjectID `json:"id" bson:"_id,omitempty"`

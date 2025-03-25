@@ -12,6 +12,7 @@ import (
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/server"
+	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/harshavmb/nannyapi/pkg/database"
@@ -60,6 +61,13 @@ func main() {
 	if os.Getenv("NANNY_ENCRYPTION_KEY") == "" {
 		log.Fatalf("NANNY_ENCRYPTION_KEY not set")
 	}
+	nannyEncryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
+
+	// Check if JWT_SECRET is present in env vars
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatalf("JWT_SECRET not set")
+	}
+	jwtSecret := os.Getenv("JWT_SECRET")
 
 	// Access preferred port the server must listen to as an environment variable if provided.
 	port := defaultPort
@@ -70,9 +78,12 @@ func main() {
 	// Initialize User Repository and Service
 	userRepo := user.NewUserRepository(mongoDB)
 	agentInfoRepo := agent.NewAgentInfoRepository(mongoDB)
-	authTokenRepo := user.NewAuthTokenRepository(mongoDB)
+	tokenRepo := token.NewTokenRepository(mongoDB)
+	refreshTokenRepo := token.NewRefreshTokenRepository(mongoDB)
 	chatRepo := chat.NewChatRepository(mongoDB)
-	userService := user.NewUserService(userRepo, authTokenRepo)
+	userService := user.NewUserService(userRepo)
+	tokenService := token.NewTokenService(tokenRepo)
+	refreshTokenService := token.NewRefreshTokenService(refreshTokenRepo)
 	agentService := agent.NewAgentInfoService(agentInfoRepo)
 	chatService := chat.NewChatService(chatRepo, agentService)
 
@@ -84,15 +95,17 @@ func main() {
 	if githubRedirectURL == "" {
 		githubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", port)
 	}
-	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService)
+	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService, refreshTokenService, nannyEncryptionKey, jwtSecret)
 
 	// Create server with Gemini client
-	srv := server.NewServer(geminiClient, githubAuth, userService, agentService, chatService)
+	srv := server.NewServer(geminiClient, githubAuth, userService, agentService, chatService, tokenService, refreshTokenService, jwtSecret, nannyEncryptionKey)
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedHeaders: []string{"Access-Control-Allow-Origin", "Content-Type"},
+		AllowedOrigins:   []string{"http://localhost:8081", "https://nannyai.harshanu.space"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Access-Control-Allow-Origin", "Content-Type", "Authorization"},
+		AllowCredentials: true,
 	})
 	handler := c.Handler(srv)
 

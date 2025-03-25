@@ -5,17 +5,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 
-	"github.com/harshavmb/nannyapi/internal/user"
+	"github.com/harshavmb/nannyapi/internal/token"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 type contextKey string
 
 const (
-	userContextKey contextKey = "user"
+	userContextKey contextKey = "userID"
 )
 
 // AuthMiddleware authenticates requests using the Authorization header.
@@ -23,65 +22,78 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check for the Authorization header
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "Authorization header is required", http.StatusUnauthorized)
+		apiKeyHeader := r.Header.Get("X-NANNYAPI-Key")
+		if authHeader == "" && apiKeyHeader == "" {
+			http.Error(w, "One of Authorization/X-NANNYAPI-Key headers is required", http.StatusUnauthorized)
 			return
 		}
 
-		// Extract the token from the header (assuming a "Bearer" token)
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token == authHeader {
-			http.Error(w, "Invalid Authorization header format", http.StatusBadRequest)
+		if authHeader != "" && apiKeyHeader != "" {
+			http.Error(w, "Only one of Authorization/X-NANNYAPI-Key headers is required", http.StatusUnauthorized)
 			return
 		}
 
-		encryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
-		if encryptionKey == "" {
-			log.Println("NANNY_ENCRYPTION_KEY not set, cannot decrypt token")
-			http.Error(w, "ENCRYPTION KEY NOT SET", http.StatusInternalServerError)
-			return
+		var userID string
+
+		// Extract the key from the header (assuming an API key)
+		if apiKeyHeader != "" {
+			// Validate the static token against the database
+			userToken, err := s.validateStaticToken(r.Context(), apiKeyHeader)
+			if err != nil {
+				log.Printf("API key validation failed: %v", err)
+				http.Error(w, "Invalid API key passed", http.StatusUnauthorized)
+				return
+			}
+			userID = userToken.UserID
 		}
 
-		// Validate the token against the database
-		userInfo, err := s.validateAuthToken(r.Context(), token, encryptionKey)
-		if err != nil {
-			log.Printf("Failed to validate auth token: %v", err)
-			http.Error(w, "Invalid auth token", http.StatusUnauthorized)
-			return
+		// Check whether valid accessToken is passed
+		if authHeader != "" {
+			// Check if the accessToken has Bearer prefix & strip that before validation
+			var tokenString string
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			} else {
+				http.Error(w, "Invalid Authorization header format, it should start with Bearer ", http.StatusUnauthorized)
+				return
+			}
+
+			// Validate the accessToken
+			userToken, err := token.ValidateJWTToken(tokenString, s.jwtSecret)
+			if err != nil {
+				log.Printf("Invalid access token: %v", err)
+				http.Error(w, "Invalid access token", http.StatusUnauthorized)
+				return
+			}
+			userID = userToken.UserID
 		}
 
-		// Add the user information to the request context
-		ctx := context.WithValue(r.Context(), userContextKey, userInfo)
-		r = r.WithContext(ctx)
+		if userID != "" {
+			// Add the user information to the request context
+			ctx := context.WithValue(r.Context(), userContextKey, userID)
+			r = r.WithContext(ctx)
+		}
 
 		// Call the next handler in the chain
 		next.ServeHTTP(w, r)
 	})
 }
 
-// GetUserFromContext retrieves the user information from the request context.
-func GetUserFromContext(r *http.Request) (*user.User, bool) {
-	userInfo, ok := r.Context().Value(userContextKey).(*user.User)
-	if ok {
-		return userInfo, ok
+// GetUserFromContext retrieves the token information from the request context.
+func GetUserFromContext(r *http.Request) (string, bool) {
+	userID, ok := r.Context().Value(userContextKey).(string)
+	if !ok {
+		return "", false
 	}
-
-	// If not found in the context, attempt to retrieve the user information from the userinfo cookie
-	// Check if user info is already in the cookie
-	userInfo, err := GetUserInfoFromCookie(r)
-	if err != nil {
-		return nil, false
-	}
-
-	return userInfo, ok
+	return userID, ok
 }
 
-func (s *Server) validateAuthToken(ctx context.Context, token string, encryptionKey string) (*user.User, error) {
+func (s *Server) validateStaticToken(ctx context.Context, tokenString string) (*token.Token, error) {
 	// Hash the token
-	hashedToken := user.HashToken(token)
+	hashedToken := token.HashToken(tokenString)
 
 	// Retrieve the auth token from the database
-	authToken, err := s.userService.GetAuthTokenByHashedToken(ctx, hashedToken)
+	token, err := s.tokenService.GetTokenByHashedToken(ctx, hashedToken)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, fmt.Errorf("auth token not found")
@@ -89,21 +101,5 @@ func (s *Server) validateAuthToken(ctx context.Context, token string, encryption
 		return nil, fmt.Errorf("failed to find auth token: %w", err)
 	}
 
-	// Decrypt the token
-	decryptedToken, err := user.Decrypt(authToken.Token, encryptionKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if decryptedToken != token {
-		return nil, fmt.Errorf("token mismatch")
-	}
-
-	// Retrieve the user from the database
-	user, err := s.userService.GetUserByEmail(ctx, authToken.Email)
-	if err != nil {
-		return nil, err
-	}
-
-	return user, nil
+	return token, nil
 }

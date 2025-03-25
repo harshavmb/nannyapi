@@ -9,19 +9,23 @@ import (
 	"log"
 	"math/big"
 	"net/http"
-	"net/url"
 	"reflect"
+	"strings"
 	"time"
 
+	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"golang.org/x/oauth2"
 	githubOAuth2 "golang.org/x/oauth2/github"
 )
 
 type GitHubAuth struct {
-	oauthConf   *oauth2.Config
-	randSrc     io.Reader
-	userService *user.UserService
+	oauthConf           *oauth2.Config
+	randSrc             io.Reader
+	userService         *user.UserService
+	refreshTokenService *token.RefreshTokenService
+	nannyEncryptionKey  string
+	jwtSecret           string
 }
 
 func (g *GitHubAuth) generateStateString() (string, error) {
@@ -43,7 +47,7 @@ func (g *GitHubAuth) generateStateString() (string, error) {
 // The "Authorization callback URL" you set there must match the redirect URL
 // you use in your code.  For local testing, something like
 // "http://localhost:8080/github/callback" is typical.
-func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user.UserService) *GitHubAuth {
+func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user.UserService, refreshTokenService *token.RefreshTokenService, nannyEncryptionKey, jwtSecret string) *GitHubAuth {
 	return &GitHubAuth{
 		oauthConf: &oauth2.Config{
 			ClientID:     clientID,
@@ -52,8 +56,11 @@ func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user
 			Scopes:       []string{"user:email"},
 			Endpoint:     githubOAuth2.Endpoint,
 		},
-		randSrc:     rand.Reader,
-		userService: userService,
+		randSrc:             rand.Reader,
+		userService:         userService,
+		refreshTokenService: refreshTokenService,
+		nannyEncryptionKey:  nannyEncryptionKey,
+		jwtSecret:           jwtSecret,
 	}
 }
 
@@ -73,7 +80,7 @@ func (g *GitHubAuth) HandleGitHubLogin() http.HandlerFunc {
 			SameSite: http.SameSiteLaxMode,
 		})
 		url := g.oauthConf.AuthCodeURL(state, oauth2.AccessTypeOffline)
-		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+		http.Redirect(w, r, url, http.StatusSeeOther)
 	}
 }
 
@@ -95,7 +102,7 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 
 		// Store the token in a cookie
 		http.SetCookie(w, &http.Cookie{
-			Name:     "Authorization",
+			Name:     "GH_Authorization",
 			Value:    token.AccessToken,
 			Expires:  time.Now().Add(time.Hour),
 			HttpOnly: true,
@@ -104,25 +111,38 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 		})
 
 		// Redirect to the profile page
-		http.Redirect(w, r, "/github/profile", http.StatusSeeOther)
+		//http.Redirect(w, r, "/github/profile", http.StatusSeeOther)
+		http.Redirect(w, r, "http://localhost:8081/dashboard", http.StatusSeeOther)
 	}
 }
 
 func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tokenCookie, err := r.Cookie("Authorization")
+
+		tokenCookie, err := r.Cookie("GH_Authorization")
 		if err != nil {
-			http.Error(w, "Authorization cookie missing", http.StatusUnauthorized)
+			http.Error(w, "GitHub Authorization cookie missing", http.StatusUnauthorized)
 			return
 		}
 
-		// Check if user info is already in the cookie
-		userCookie, err := r.Cookie("userinfo")
-		if err == nil && userCookie.Value != "" {
-			// User info found in cookie, redirect to index
-			redirectURL := "/"
-			http.Redirect(w, r, redirectURL, http.StatusSeeOther)
-			return
+		// Check for the presence of the refresh_token cookie
+		refreshTokenCookie, err := r.Cookie("refresh_token")
+		if err == nil {
+			// Validate the existing refresh token
+			_, err := token.ValidateJWTToken(refreshTokenCookie.Value, g.jwtSecret)
+			if err == nil {
+				// Reuse the existing refresh token if valid
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				// Return tokens and user info
+				refreshTokenResponse := map[string]interface{}{
+					"refresh_token": refreshTokenCookie.Value,
+				}
+				json.NewEncoder(w).Encode(refreshTokenResponse)
+				return // we don't execute further to avoid more DB calls
+			} else {
+				log.Printf("Existing refresh token is invalid: %v", err)
+			}
 		}
 
 		client := g.oauthConf.Client(context.Background(), &oauth2.Token{AccessToken: tokenCookie.Value})
@@ -147,6 +167,7 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 		user := user.User{}
 
 		// Use reflection to dynamically map fields
+		// TO-DO, find a better way to set user than reflection
 		userValue := reflect.ValueOf(&user).Elem()
 		userType := userValue.Type()
 
@@ -192,35 +213,66 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			}
 		}
 
-		// Store user info in a cookie
-		userJSON, err := json.Marshal(user)
-		if err != nil {
-			log.Printf("Failed to marshal user info: %v", err)
-			http.Error(w, "Failed to store user info", http.StatusInternalServerError)
-			return
-		}
-
-		// URL-encode the JSON string
-		encodedUserJSON := url.QueryEscape(string(userJSON))
-
-		userCookie = &http.Cookie{
-			Name:     "userinfo",
-			Value:    encodedUserJSON,
-			Path:     "/",
-			Secure:   true,                    // Only send over HTTPS
-			SameSite: http.SameSiteStrictMode, // Mitigate CSRF attacks
-			Expires:  time.Now().Add(24 * time.Hour),
-		}
-		http.SetCookie(w, userCookie)
-
 		// Save user information to the database
 		if err := g.userService.SaveUser(r.Context(), userInfo); err != nil {
 			http.Error(w, "Failed to save user info: "+err.Error(), http.StatusInternalServerError)
 		}
 
-		// Redirect to index
-		redirectURL := "/"
-		http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+		// Fetch the userID
+		userByEmail, err := g.userService.GetUserByEmail(context.Background(), user.Email)
+		if err != nil {
+			http.Error(w, "Failed to fetch user info by email: "+err.Error(), http.StatusInternalServerError)
+		}
+		userID := userByEmail.ID.Hex()
+
+		// Generate Acccess and Refresh Tokens
+		refreshToken, err := token.GenerateJWT(userID, 7*24*time.Hour, "refresh", g.jwtSecret)
+		if err != nil {
+			http.Error(w, "Failed to generate refresh token: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		ipAddress := strings.Split(r.RemoteAddr, ":")
+
+		// Save the new refresh token in database
+		refreshTokenData := &token.RefreshToken{
+			Token:     refreshToken,
+			UserID:    userID,
+			UserAgent: r.UserAgent(),
+			IPAddress: ipAddress[0],
+		}
+		_, err = g.refreshTokenService.CreateRefreshToken(context.Background(), *refreshTokenData, g.nannyEncryptionKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		accessToken, err := token.GenerateJWT(userID, 15*time.Minute, "access", g.jwtSecret)
+		if err != nil {
+			http.Error(w, "Failed to generate access token: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Return tokens and user info
+		response := map[string]interface{}{
+			"user":          user,
+			"access_token":  accessToken,
+			"refresh_token": refreshToken,
+		}
+
+		// Store the refresh_token in a http-only cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "refresh_token",
+			Value:    refreshToken,
+			Expires:  time.Now().Add(7 * 24 * time.Hour),
+			HttpOnly: true,
+			Path:     "/",
+			SameSite: http.SameSiteLaxMode,
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
 	}
 }
 

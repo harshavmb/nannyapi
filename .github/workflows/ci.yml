@@ -28,3 +28,4 @@ jobs:
         GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
         MONGODB_URI: ${{ secrets.MONGODB_URI }}
         NANNY_ENCRYPTION_KEY: ${{ secrets.NANNY_ENCRYPTION_KEY }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}

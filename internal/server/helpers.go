@@ -7,12 +7,17 @@ import (
 	"log"
 	"mime"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/generative-ai-go/genai"
-	"github.com/harshavmb/nannyapi/internal/user"
+	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/token"
+)
+
+const (
+	Issuer = "https://nannyai.harshanu.space"
 )
 
 // chatRequest represents the request payload for the chat handler
@@ -89,6 +94,18 @@ func sendCommandsToAgent(w http.ResponseWriter, commands []string) {
 	json.NewEncoder(w).Encode(map[string][]string{"commands": commands})
 }
 
+func generateHistory(prompts, responses, types []string) []chat.PromptResponse {
+	history := make([]chat.PromptResponse, len(prompts))
+	for i := range prompts {
+		history[i] = chat.PromptResponse{
+			Prompt:   prompts[i],
+			Response: responses[i],
+			Type:     types[i],
+		}
+	}
+	return history
+}
+
 func getAgentResponse(r *http.Request) string {
 	// Read JSON from the request body (agent's output)
 	var agentOutput struct {
@@ -121,47 +138,6 @@ func sendGeminiFeedbackToClient(w http.ResponseWriter, feedback string) {
 	json.NewEncoder(w).Encode(map[string]string{"feedback": feedback})
 }
 
-func (s *Server) getMaskedAuthToken(r *http.Request, userEmail, encryptionKey string) (*user.AuthToken, error) {
-
-	authToken, err := s.userService.GetAuthToken(r.Context(), userEmail, encryptionKey)
-	if err != nil {
-		if err == context.Canceled {
-			log.Printf("Failed to get auth token: context canceled")
-			return nil, nil // Return nil error and nil auth token
-		}
-		return nil, err // Return nil error as it could be that token is not created yet
-	}
-
-	return authToken, nil // Return nil error as it could be that token is not created yet
-}
-
-// GetUserInfoFromCookie retrieves user information from the "userinfo" cookie.
-func GetUserInfoFromCookie(r *http.Request) (*user.User, error) {
-	userCookie, err := r.Cookie("userinfo")
-	if err != nil {
-		return nil, fmt.Errorf("user not authenticated")
-	}
-
-	decodedValue, err := url.QueryUnescape(userCookie.Value)
-	if err != nil {
-		return nil, fmt.Errorf("failed to URL unescape user info: %v", err)
-	}
-
-	var user user.User
-	err = json.Unmarshal([]byte(decodedValue), &user)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal user info: %v", err)
-	}
-
-	return &user, nil
-}
-
-// IsSessionValid checks if the user session is valid.
-func IsSessionValid(r *http.Request) bool {
-	_, err := r.Cookie("userinfo")
-	return err == nil
-}
-
 // IsValidEmail checks if a string is a valid email address
 func IsValidEmail(email string) bool {
 	// Updated regular expression to handle IP addresses in square brackets
@@ -192,4 +168,56 @@ func IsValidEmail(email string) bool {
 	}
 
 	return true
+}
+
+func generateRefreshToken(userID, jwtSecret string) (string, error) {
+	duration := 7 * 24 * time.Hour
+	refreshToken, err := token.GenerateJWT(userID, duration, "refresh", jwtSecret)
+	if err != nil {
+		return "", err
+	}
+	return refreshToken, nil
+}
+
+func generateAccessToken(userID, jwtSecret string) (string, error) {
+	duration := 1 * 15 * time.Minute // 15 minutes
+	accessToken, err := token.GenerateJWT(userID, duration, "access", jwtSecret)
+	if err != nil {
+		return "", err
+	}
+	return accessToken, nil
+}
+
+func (s *Server) deleteRefreshToken(ctx context.Context, tokenString string) error {
+	hashedToken := token.HashToken(tokenString)
+	return s.refreshTokenservice.DeleteRefreshToken(ctx, hashedToken)
+}
+
+func (s *Server) validateRefreshToken(ctx context.Context, tokenString, jwtSecret string) (bool, *token.Claims, error) {
+	hashedToken := token.HashToken(tokenString)
+
+	// Validate the refresh token
+	claims, err := token.ValidateJWTToken(tokenString, jwtSecret)
+	if err != nil {
+		return false, nil, err
+	}
+	// Check if the token exists in the database and is not revoked
+	refreshToken, err := s.refreshTokenservice.GetRefreshTokenByHashedToken(ctx, hashedToken)
+	if err != nil {
+		return false, claims, err
+	}
+	if refreshToken != nil {
+		// Check if the token is revoked
+		if refreshToken.Revoked {
+			return false, claims, fmt.Errorf("refresh token revoked")
+		}
+
+		// Check if the token has expired
+		if time.Now().After(refreshToken.ExpiresAt) {
+			return false, claims, fmt.Errorf("refresh token expired")
+		}
+
+		return true, claims, nil
+	}
+	return false, nil, nil
 }

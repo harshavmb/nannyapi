@@ -17,6 +17,7 @@ import (
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,8 @@ import (
 const (
 	testDBName         = "test_db"
 	testCollectionName = "servers"
+	jwtSecret          = "d2a8b6aad8fb7d736508a520e2d53460054d21b14c1a8be86ec61e654ee807e6d47e167628bdeb59d7da25ac4de4ab1cbc161b2a335924b89e22fdac3bc44511e9fa896031b3154fd7365fe01c539ef5681ba70a65619eae8c7c14b832ea989d779d828a4e95e63181ae70ad0d855a40477144cc892097e0b0c0abfd5a26ce5f8bc0159bf44171a6dcd295aa810c4759ae0a0bc0f13b9f5872fd048ab9daa94c64d5e999dc7ea928f5a87731b468c25f2a67a6180f8f99bd9d38c706f9ca77f74e0929b5abec65c3b26d641f57a6c683a0770880748ebc5804ada5179a0252228b1a328898cae4a0d987767889251eda344cb45fd4725099de8f0947328a6166" //just for testing not used anywhere
+	encryptionKey      = "T3byOVRJGt/25v6c6GC3wWkNKtL1WPuW5yVjCEnaHA8="                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     // Base64 encoded 32-byte key
 )
 
 func setupTestDB(t *testing.T) (*mongo.Client, func()) {
@@ -40,7 +43,7 @@ func setupTestDB(t *testing.T) (*mongo.Client, func()) {
 
 	// Cleanup function to drop the test database after tests
 	cleanup := func() {
-		err := client.Database(testDBName).Drop(context.Background())
+		err := client.Database(testDBName).Collection(testCollectionName).Drop(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to drop test database: %v", err)
 		}
@@ -53,10 +56,7 @@ func setupTestDB(t *testing.T) (*mongo.Client, func()) {
 	return client, cleanup
 }
 
-func setupServer(t *testing.T) (*Server, func(), string) {
-	// Set the template path for testing
-	os.Setenv("NANNY_TEMPLATE_PATH", "../../static/index.html")
-
+func setupServer(t *testing.T) (*Server, func(), string, string) {
 	// Mock Gemini Client
 	mockGeminiClient := &api.GeminiClient{}
 
@@ -67,19 +67,22 @@ func setupServer(t *testing.T) (*Server, func(), string) {
 	client, cleanup := setupTestDB(t)
 	//defer cleanup()
 
-	// Create a new User Repository
+	// Create a new Repository objects
 	userRepository := user.NewUserRepository(client.Database(testDBName))
-	authTokenRepository := user.NewAuthTokenRepository(client.Database(testDBName))
+	tokenRepository := token.NewTokenRepository(client.Database(testDBName))
+	refreshTokenRepository := token.NewRefreshTokenRepository(client.Database(testDBName))
 	agentInfoRepository := agent.NewAgentInfoRepository(client.Database(testDBName))
 	ChatRepository := chat.NewChatRepository(client.Database(testDBName))
 
-	// Mock User Service
-	mockUserService := user.NewUserService(userRepository, authTokenRepository)
+	// Mock Services
+	mockUserService := user.NewUserService(userRepository)
 	agentInfoservice := agent.NewAgentInfoService(agentInfoRepository)
 	chatService := chat.NewChatService(ChatRepository, agentInfoservice)
+	mockTokenService := token.NewTokenService(tokenRepository)
+	mockRefreshTokenService := token.NewRefreshTokenService(refreshTokenRepository)
 
 	// Create a new server instance
-	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService)
+	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, jwtSecret, encryptionKey)
 
 	// Create a valid auth token for the test user
 	testUser := &user.User{
@@ -89,10 +92,7 @@ func setupServer(t *testing.T) (*Server, func(), string) {
 		HTMLURL:      "http://example.com",
 		LastLoggedIn: time.Now(),
 	}
-	encryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
-	if encryptionKey == "" {
-		t.Fatal("NANNY_ENCRYPTION_KEY not set")
-	}
+
 	err := mockUserService.SaveUser(context.Background(), map[string]interface{}{
 		"email":          testUser.Email,
 		"name":           testUser.Name,
@@ -103,75 +103,27 @@ func setupServer(t *testing.T) (*Server, func(), string) {
 	if err != nil {
 		t.Fatalf("Failed to create user: %v", err)
 	}
-	authToken, err := mockUserService.CreateAuthToken(context.Background(), testUser.Email, encryptionKey)
+
+	staticToken := token.Token{
+		UserID: token.GenerateRandomString(6),
+		Token:  token.GenerateRandomString(10),
+	}
+
+	_, err = mockTokenService.CreateToken(context.Background(), staticToken, encryptionKey)
 	if err != nil {
 		t.Fatalf("Failed to create auth token: %v", err)
 	}
 
-	decryptedToken, err := user.Decrypt(authToken.Token, encryptionKey)
+	accessToken, err := generateAccessToken(staticToken.UserID, jwtSecret)
 	if err != nil {
-		log.Fatalf("Failed to decrypt token: %v", err)
+		t.Fatalf("Failed to create access token: %v", err)
 	}
 
-	return server, cleanup, decryptedToken
-}
-
-func generateHistory(prompts, responses, types []string) []chat.PromptResponse {
-	history := make([]chat.PromptResponse, len(prompts))
-	for i := range prompts {
-		history[i] = chat.PromptResponse{
-			Prompt:   prompts[i],
-			Response: responses[i],
-			Type:     types[i],
-		}
-	}
-	return history
-}
-
-func TestHandleStatus(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("GET", "/status", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusOK)
-	}
-
-	expected := `{"status":"ok"}`
-	actual := strings.TrimSpace(recorder.Body.String())
-	if actual != expected {
-		t.Errorf("handler returned unexpected body: got %v want %v", actual, expected)
-	}
-}
-
-func TestHandleGetAuthTokens_NoAuth(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("GET", "/api/auth-tokens", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusUnauthorized {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusUnauthorized)
-	}
+	return server, cleanup, staticToken.Token, accessToken
 }
 
 func TestHandleDeleteAuthToken_NoAuth(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
+	server, cleanup, _, _ := setupServer(t)
 	defer cleanup()
 
 	tokenID := bson.NewObjectID().Hex()
@@ -189,123 +141,9 @@ func TestHandleDeleteAuthToken_NoAuth(t *testing.T) {
 	}
 }
 
-func TestHandleAuthTokensPage(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("GET", "/auth-tokens", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusUnauthorized {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusUnauthorized)
-	}
-}
-
-func TestHandleCreateAuthToken_NoAuth(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("POST", "/create-auth-token", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusSeeOther {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusSeeOther)
-	}
-}
-
-func TestHandleIndex(t *testing.T) {
-	server, cleanup, _ := setupServer(t)
-	defer cleanup()
-
-	req, err := http.NewRequest("GET", "/", nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
-
-	if status := recorder.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusOK)
-	}
-}
-
-// FIX-ME, NOT WORKING, panic
-// func TestAuthMiddleware_ValidToken(t *testing.T) {
-// 	// Set up the server
-// 	server := setupServer(t)
-
-// 	// Set up a test user
-// 	testUser := &user.User{
-// 		Email: "test@example.com",
-// 	}
-
-// 	// Set up a test auth token
-// 	encryptionKey := os.Getenv("NANNY_ENCRYPTION_KEY")
-// 	if encryptionKey == "" {
-// 		t.Fatal("NANNY_ENCRYPTION_KEY not set")
-// 	}
-
-// 	authToken, err := server.userService.CreateAuthToken(context.Background(), testUser.Email, encryptionKey)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create auth token: %v", err)
-// 	}
-
-// 	// Create a test request
-// 	req, err := http.NewRequest("GET", "/api/auth-tokens", nil)
-// 	if err != nil {
-// 		t.Fatalf("Could not create request: %v", err)
-// 	}
-
-// 	// Set the Authorization header with the valid token
-// 	req.Header.Set("Authorization", "Bearer "+authToken.Token)
-
-// 	// Create a test recorder
-// 	recorder := httptest.NewRecorder()
-
-// 	// Serve the request
-// 	server.ServeHTTP(recorder, req)
-
-// 	// Check the response status code
-// 	if recorder.Code != http.StatusOK {
-// 		t.Errorf("Expected status code %d, but got %d", http.StatusOK, recorder.Code)
-// 	}
-
-// 	// Check the response body
-// 	body, err := io.ReadAll(recorder.Body)
-// 	if err != nil {
-// 		t.Fatalf("Could not read response body: %v", err)
-// 	}
-
-// 	// Unmarshal the response body
-// 	var authTokens []AuthTokenData
-// 	err = json.Unmarshal(body, &authTokens)
-// 	if err != nil {
-// 		t.Fatalf("Could not unmarshal response body: %v", err)
-// 	}
-
-// 	// Check that the response contains the expected data
-// 	if len(authTokens) == 0 {
-// 		t.Errorf("Expected at least one auth token, but got none")
-// 	}
-// }
-
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	// Set up the server
-	server, cleanup, _ := setupServer(t)
+	server, cleanup, _, _ := setupServer(t)
 	defer cleanup()
 
 	// Create a test request with an invalid token
@@ -331,7 +169,7 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not read response body: %v", err)
 	}
-	expected := "Invalid auth token\n"
+	expected := "Invalid access token\n"
 	if string(body) != expected {
 		t.Errorf("Expected body %q, but got %q", expected, string(body))
 	}
@@ -339,7 +177,7 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 
 func TestAuthMiddleware_MissingToken(t *testing.T) {
 	// Set up the server
-	server, cleanup, _ := setupServer(t)
+	server, cleanup, _, _ := setupServer(t)
 	defer cleanup()
 
 	// Create a test request without a token
@@ -364,14 +202,51 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not read response body: %v", err)
 	}
-	expected := "Authorization header is required\n"
+	expected := "One of Authorization/X-NANNYAPI-Key headers is required\n"
 	if string(body) != expected {
 		t.Errorf("Expected body %q, but got %q", expected, string(body))
 	}
 }
 
-func TestHandleAgentInfo(t *testing.T) {
-	server, cleanup, validToken := setupServer(t)
+func TestAuthMiddleware_BothStaticAndAccessTokens(t *testing.T) {
+	// Set up the server
+	server, cleanup, apiKey, accesstoken := setupServer(t)
+	defer cleanup()
+
+	// Create a test request without a token
+	req, err := http.NewRequest("GET", "/api/auth-tokens", nil)
+	if err != nil {
+		t.Fatalf("Could not create request: %v", err)
+	}
+
+	// set both Access token and API keys
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accesstoken))
+	req.Header.Set("X-NANNYAPI-Key", apiKey)
+
+	// Create a test recorder
+	recorder := httptest.NewRecorder()
+
+	// Serve the request
+	server.ServeHTTP(recorder, req)
+
+	// Check the response status code
+	if recorder.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status code %d, but got %d", http.StatusUnauthorized, recorder.Code)
+	}
+
+	// Check the response body
+	body, err := io.ReadAll(recorder.Body)
+	if err != nil {
+		t.Fatalf("Could not read response body: %v", err)
+	}
+	expected := "Only one of Authorization/X-NANNYAPI-Key headers is required\n"
+	if string(body) != expected {
+		t.Errorf("Expected body %q, but got %q", expected, string(body))
+	}
+}
+
+func TestHandleAgentInfoWithAccessToken(t *testing.T) {
+	server, cleanup, _, accessToken := setupServer(t)
 	defer cleanup()
 
 	t.Run("ValidRequest", func(t *testing.T) {
@@ -383,7 +258,7 @@ func TestHandleAgentInfo(t *testing.T) {
 		}
 
 		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		req.Header.Set("Authorization", "Bearer "+accessToken)
 
 		// Create a test recorder
 		recorder := httptest.NewRecorder()
@@ -422,7 +297,7 @@ func TestHandleAgentInfo(t *testing.T) {
 		}
 
 		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		req.Header.Set("Authorization", "Bearer "+accessToken)
 
 		// Create a test recorder
 		recorder := httptest.NewRecorder()
@@ -465,13 +340,13 @@ func TestHandleAgentInfo(t *testing.T) {
 }
 
 func TestHandleGetAgentInfoByID(t *testing.T) {
-	server, cleanup, validToken := setupServer(t)
+	server, cleanup, validToken, _ := setupServer(t)
 	defer cleanup()
 
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			Email:         "test@example.com",
+			UserID:        "123456",
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -492,7 +367,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		// Create a test recorder
 		recorder := httptest.NewRecorder()
@@ -506,7 +381,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Check the response body
-		expected := fmt.Sprintf(`{"id":"%s","email":"test@example.com","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID) // Partial match
+		expected := fmt.Sprintf(`{"id":"%s","user_id":"123456","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID) // Partial match
 		actual := strings.TrimSpace(recorder.Body.String())
 		if !strings.Contains(actual, expected) {
 			t.Errorf("Expected body to contain %q, but got %q", expected, actual)
@@ -521,7 +396,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		// Create a test recorder
 		recorder := httptest.NewRecorder()
@@ -544,13 +419,13 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 }
 
 func TestHandleStartChat(t *testing.T) {
-	server, cleanup, validToken := setupServer(t)
+	server, cleanup, validToken, _ := setupServer(t)
 	defer cleanup()
 
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			Email:         "test@example.com",
+			UserID:        "123456",
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -567,8 +442,8 @@ func TestHandleStartChat(t *testing.T) {
 		chat := fmt.Sprintf(`{"agent_id":"%s"}`, agentInfoID)
 		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		assert.NoError(t, err)
 
@@ -598,8 +473,8 @@ func TestHandleStartChat(t *testing.T) {
 		chat := fmt.Sprintf(`{"agent_id":"%s"}`, "agent1")
 		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		assert.NoError(t, err)
 
@@ -620,8 +495,8 @@ func TestHandleStartChat(t *testing.T) {
 		chat := fmt.Sprintf(`{"agent_id":"%s"}`, bson.NewObjectID().Hex())
 		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		assert.NoError(t, err)
 
@@ -642,8 +517,8 @@ func TestHandleStartChat(t *testing.T) {
 		requestBody := `{"invalid_field":"value"}`
 		req, err := http.NewRequest("POST", "/api/chat", bytes.NewBufferString(requestBody))
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		assert.NoError(t, err)
 
@@ -655,13 +530,13 @@ func TestHandleStartChat(t *testing.T) {
 }
 
 func TestChatService_AddPromptResponse(t *testing.T) {
-	server, cleanup, validToken := setupServer(t)
+	server, cleanup, validToken, _ := setupServer(t)
 	defer cleanup()
 
 	t.Run("ValidRequestText", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			Email:         "test@example.com",
+			UserID:        "123456",
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -694,8 +569,8 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
 		assert.NoError(t, err)
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -716,7 +591,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 	t.Run("ValidRequestCommand", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			Email:         "test@example.com",
+			UserID:        "123456",
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -749,8 +624,8 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
 		assert.NoError(t, err)
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -771,7 +646,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 	t.Run("InValidRequestPayload", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			Email:         "test@example.com",
+			UserID:        "123456",
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -804,8 +679,8 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
 		assert.NoError(t, err)
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -819,8 +694,8 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", bson.NewObjectID().Hex()), strings.NewReader(reqBody))
 		assert.NoError(t, err)
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -830,13 +705,13 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 }
 
 func TestChatService_GetChatByID(t *testing.T) {
-	server, cleanup, validToken := setupServer(t)
+	server, cleanup, validToken, _ := setupServer(t)
 	defer cleanup()
 
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			Email:         "test@example.com",
+			UserID:        "123456",
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -866,8 +741,8 @@ func TestChatService_GetChatByID(t *testing.T) {
 		req, err := http.NewRequest("GET", fmt.Sprintf("/api/chat/%s", chatID), nil)
 		assert.NoError(t, err)
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -885,7 +760,7 @@ func TestChatService_GetChatByID(t *testing.T) {
 	t.Run("NonExistentChat", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			Email:         "test@example.com",
+			UserID:        "123456",
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -914,8 +789,8 @@ func TestChatService_GetChatByID(t *testing.T) {
 		req, err := http.NewRequest("GET", fmt.Sprintf("/api/chat/%s", bson.NewObjectID().Hex()), nil)
 		assert.NoError(t, err)
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -928,8 +803,8 @@ func TestChatService_GetChatByID(t *testing.T) {
 		req, err := http.NewRequest("GET", fmt.Sprintf("/api/chat/%s", ""), nil)
 		assert.NoError(t, err)
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -943,7 +818,7 @@ func TestNannyAPIPortOverride(t *testing.T) {
 	os.Setenv("NANNY_API_PORT", "9090")
 	defer os.Unsetenv("NANNYAPI_PORT")
 
-	server, cleanup, _ := setupServer(t)
+	server, cleanup, _, _ := setupServer(t)
 	defer cleanup()
 
 	// Check if the server is running on the correct port
@@ -974,7 +849,7 @@ func TestSwaggerURL(t *testing.T) {
 	os.Setenv("NANNY_SWAGGER_URL", "http://localhost:9090/swagger/doc.json")
 	defer os.Unsetenv("NANNY_SWAGGER_URL")
 
-	server, cleanup, _ := setupServer(t)
+	server, cleanup, _, _ := setupServer(t)
 	defer cleanup()
 
 	// Check if the server is running on the correct github callback url
@@ -986,21 +861,28 @@ func TestGitHubRedirectURL(t *testing.T) {
 	os.Setenv("GH_REDIRECT_URL", "http://example.net/swagger/doc.json")
 	defer os.Unsetenv("GH_REDIRECT_URL")
 
-	server, cleanup, _ := setupServer(t)
+	server, cleanup, _, _ := setupServer(t)
 	defer cleanup()
 
 	// Check if the server is running on the correct github callback url
 	assert.Equal(t, os.Getenv("GH_REDIRECT_URL"), server.gitHubRedirectURL)
 }
 
-func TestHandleAgentInfos(t *testing.T) {
-	server, cleanup, validToken := setupServer(t)
+func TestHandleAgentInfosWithAPIKey(t *testing.T) {
+	server, cleanup, validToken, _ := setupServer(t)
 	defer cleanup()
+
+	// Get the userID
+	// TO-DO until all the relationships between collections are sorted
+	claims, err := server.tokenService.GetTokenByHashedToken(context.Background(), token.HashToken(validToken))
+	if err != nil {
+		log.Fatalf("error while fetching claims: %v", err)
+	}
 
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			Email:         "test@example.com",
+			UserID:        claims.UserID,
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -1020,8 +902,8 @@ func TestHandleAgentInfos(t *testing.T) {
 			t.Fatalf("Could not create request: %v", err)
 		}
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1029,7 +911,7 @@ func TestHandleAgentInfos(t *testing.T) {
 		assert.Equal(t, http.StatusOK, recorder.Code)
 
 		// Check the response body
-		expected := fmt.Sprintf(`[{"id":"%s","email":"test@example.com","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID) // Partial match
+		expected := fmt.Sprintf(`[{"id":"%s","user_id":"%s","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID, claims.UserID) // Partial match
 		actual := strings.TrimSpace(recorder.Body.String())
 		if !strings.Contains(actual, expected) {
 			t.Errorf("Expected body to contain %q, but got %q", expected, actual)
@@ -1038,86 +920,8 @@ func TestHandleAgentInfos(t *testing.T) {
 
 }
 
-func TestHandleFetchUserInfoFromEmail(t *testing.T) {
-	server, cleanup, validToken := setupServer(t)
-	defer cleanup()
-
-	t.Run("ValidEmail", func(t *testing.T) {
-		// Create a request with a valid email
-		req, err := http.NewRequest("GET", "/api/user/test@example.com", nil)
-		assert.NoError(t, err)
-
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusOK, recorder.Code)
-
-		var response map[string]string
-		err = json.NewDecoder(recorder.Body).Decode(&response)
-		assert.NoError(t, err)
-		assert.Equal(t, "test@example.com", response["email"])
-		assert.Equal(t, "Find Me", response["name"])
-		assert.Equal(t, "http://example.com/avatar.png", response["avatar_url"])
-	})
-
-	// Uncomment this test once the email validation is implemented
-	// t.Run("InvalidEmailFormat", func(t *testing.T) {
-	// 	// Create a request with an invalid email format
-	// 	req, err := http.NewRequest("GET", "/api/user/invalid-email", nil)
-	// 	assert.NoError(t, err)
-
-	// 	// Set a valid Authorization header
-	// 	req.Header.Set("Authorization", "Bearer "+validToken)
-
-	// 	recorder := httptest.NewRecorder()
-	// 	server.ServeHTTP(recorder, req)
-
-	// 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-
-	// 	expected := `{"error":"Invalid email format"}`
-	// 	actual := strings.TrimSpace(recorder.Body.String())
-	// 	assert.Equal(t, expected, actual)
-	// })
-
-	t.Run("UserNotFound", func(t *testing.T) {
-		// Create a request with an email that does not exist in the database
-		req, err := http.NewRequest("GET", "/api/user/nonexistent@example.com", nil)
-		assert.NoError(t, err)
-
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusNotFound, recorder.Code)
-		expected := `{"error":"User not found"}`
-		actual := strings.TrimSpace(recorder.Body.String())
-		assert.Equal(t, expected, actual)
-	})
-
-	t.Run("UnauthorizedRequest", func(t *testing.T) {
-		// Create a request with a valid email
-		req, err := http.NewRequest("GET", "/api/user/test@example.com", nil)
-		assert.NoError(t, err)
-
-		// Do not set an Authorization header
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
-
-		expected := `Authorization header is required`
-		actual := strings.TrimSpace(recorder.Body.String())
-		assert.Equal(t, expected, actual)
-	})
-}
-
 func TestHandleFetchUserInfoFromID(t *testing.T) {
-	server, cleanup, validToken := setupServer(t)
+	server, cleanup, validToken, _ := setupServer(t)
 	defer cleanup()
 
 	t.Run("ValidEmail", func(t *testing.T) {
@@ -1129,8 +933,8 @@ func TestHandleFetchUserInfoFromID(t *testing.T) {
 		req, err := http.NewRequest("GET", fmt.Sprintf("/api/user/%s", user.ID.Hex()), nil)
 		assert.NoError(t, err)
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1150,8 +954,8 @@ func TestHandleFetchUserInfoFromID(t *testing.T) {
 		req, err := http.NewRequest("GET", fmt.Sprintf("/api/user/%s", bson.NewObjectID().Hex()), nil)
 		assert.NoError(t, err)
 
-		// Set a valid Authorization header
-		req.Header.Set("Authorization", "Bearer "+validToken)
+		// Set a valid X-NANNYAPI-Key header
+		req.Header.Set("X-NANNYAPI-Key", validToken)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1173,7 +977,142 @@ func TestHandleFetchUserInfoFromID(t *testing.T) {
 
 		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
 
-		expected := `Authorization header is required`
+		expected := `One of Authorization/X-NANNYAPI-Key headers is required`
+		actual := strings.TrimSpace(recorder.Body.String())
+		assert.Equal(t, expected, actual)
+	})
+}
+
+func TestHandleRefreshToken(t *testing.T) {
+	server, cleanup, _, _ := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRefreshToken", func(t *testing.T) {
+		userID := "test-user-id"
+		// Generate the refresh token
+		tokenString, err := generateRefreshToken(userID, jwtSecret)
+		if err != nil {
+			log.Fatalf("error generating refresh token %v", err)
+		}
+
+		// Create a valid refresh token
+		refreshToken, err := server.refreshTokenservice.CreateRefreshToken(context.Background(), token.RefreshToken{
+			UserID:    userID,
+			UserAgent: "test-agent",
+			IPAddress: "127.0.0.1",
+			Token:     tokenString,
+		}, server.nannyEncryptionKey)
+		assert.NoError(t, err)
+
+		// Create a request with the valid refresh token
+		req, err := http.NewRequest("POST", "/api/refresh-token", nil)
+		assert.NoError(t, err)
+		req.AddCookie(&http.Cookie{
+			Name:     "refresh_token",
+			Value:    tokenString,
+			HttpOnly: true,
+		})
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusCreated, recorder.Code)
+
+		var response map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&response)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, response["access_token"])
+		assert.NotEmpty(t, response["refresh_token"])
+		assert.Equal(t, token.HashToken(tokenString), refreshToken.HashedToken)
+	})
+
+	t.Run("ExpiredRefreshToken", func(t *testing.T) {
+		userID := "test-user-id"
+		// Generate the refresh token
+		tokenString, err := generateRefreshToken(userID, jwtSecret)
+		if err != nil {
+			log.Fatalf("error generating refresh token %v", err)
+		}
+
+		// Create a valid refresh token
+		refreshToken, err := server.refreshTokenservice.CreateRefreshToken(context.Background(), token.RefreshToken{
+			UserID:    userID,
+			UserAgent: "test-agent",
+			IPAddress: "127.0.0.1",
+			Token:     tokenString,
+		}, server.nannyEncryptionKey)
+		assert.NoError(t, err)
+
+		// Simulate an expired refresh token
+		updatedToken := token.RefreshToken{
+			ID:        refreshToken.ID,
+			UserID:    refreshToken.UserID,
+			Token:     tokenString,
+			CreatedAt: refreshToken.CreatedAt,
+			ExpiresAt: time.Now().AddDate(0, 0, -10), // +7-10 == -3 days back
+			Revoked:   refreshToken.Revoked,
+			UserAgent: refreshToken.UserAgent,
+			IPAddress: refreshToken.IPAddress,
+		}
+
+		// update the token now
+		err = server.refreshTokenservice.UpdateRefreshToken(context.Background(), updatedToken, server.nannyEncryptionKey)
+		if err != nil {
+			log.Fatalf("error updating refresh token %v", err)
+		}
+
+		// Create a request with the expired refresh token
+		req, err := http.NewRequest("POST", "/api/refresh-token", nil)
+		assert.NoError(t, err)
+		req.AddCookie(&http.Cookie{
+			Name:     "refresh_token",
+			Value:    tokenString,
+			HttpOnly: true,
+		})
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusCreated, recorder.Code)
+
+		var response map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&response)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, response["access_token"])
+		assert.NotEmpty(t, response["refresh_token"])
+	})
+
+	t.Run("InvalidRefreshToken", func(t *testing.T) {
+		// Create a request with an invalid refresh token
+		req, err := http.NewRequest("POST", "/api/refresh-token", nil)
+		assert.NoError(t, err)
+		req.AddCookie(&http.Cookie{
+			Name:     "refresh_token",
+			Value:    "invalid-token",
+			HttpOnly: true,
+		})
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+
+		expected := "invalid token"
+		actual := strings.TrimSpace(recorder.Body.String())
+		assert.Contains(t, actual, expected)
+	})
+
+	t.Run("MissingRefreshToken", func(t *testing.T) {
+		// Create a request without a refresh token
+		req, err := http.NewRequest("POST", "/api/refresh-token", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+
+		expected := "Refresh token is required"
 		actual := strings.TrimSpace(recorder.Body.String())
 		assert.Equal(t, expected, actual)
 	})
