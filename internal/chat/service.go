@@ -2,8 +2,11 @@ package chat
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 
 	"github.com/harshavmb/nannyapi/internal/agent"
@@ -76,8 +79,20 @@ func (s *ChatService) processPromptResponse(promptResponse *PromptResponse) erro
 	case "text":
 		// Process the text response
 		// (This is a placeholder for the actual implementation)
+		commandOutput := promptResponse.Prompt
+		log.Printf("command output recieved from agent: %s", commandOutput)
+		promptResponse.Response = randomString(20)
 	default:
 		return fmt.Errorf("invalid response type: %s", promptResponse.Type)
 	}
 	return nil
+}
+
+// will be removed
+// just faking an API response
+func randomString(length int) string {
+	buff := make([]byte, int(math.Ceil(float64(length)/2)))
+	rand.Read(buff)
+	str := hex.EncodeToString(buff)
+	return str[:length] // strip 1 extra character we get from odd length results
 }
