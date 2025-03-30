@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	Issuer = "https://nannyai.harshanu.space"
+	Issuer = "https://nannyai.dev"
 )
 
 // chatRequest represents the request payload for the chat handler

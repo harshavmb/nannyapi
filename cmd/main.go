@@ -22,7 +22,7 @@ import (
 const defaultPort = "8080"
 
 //	@contact.name	API Support
-//	@contact.url	https://nannyai.harshanu.space/support
+//	@contact.url	https://nannyai.dev/support
 //	@contact.email	harsha@harshanu.space
 
 // @license.name	GNU General Public License v3.0
@@ -33,7 +33,7 @@ func main() {
 	docs.SwaggerInfo.Title = "NannyAPI"
 	docs.SwaggerInfo.Description = "This is an API endpoint service that receives prompts from nannyagents, do some preprocessing, interact with remote/self-hosted AI APIs to help answering prompts issued by nannyagents."
 	docs.SwaggerInfo.Version = "2.0"
-	docs.SwaggerInfo.Host = "nannyai.harshanu.space"
+	docs.SwaggerInfo.Host = "nannyai.dev"
 	docs.SwaggerInfo.BasePath = "/api/v1"
 
 	ctx := context.Background()
@@ -69,6 +69,12 @@ func main() {
 	}
 	jwtSecret := os.Getenv("JWT_SECRET")
 
+	// Get the frontend Host from the environment variable
+	frontendHost := os.Getenv("FRONTEND_HOST")
+	if frontendHost == "" {
+		frontendHost = "http://localhost:8081" // Default frontend Host
+	}
+
 	// Access preferred port the server must listen to as an environment variable if provided.
 	port := defaultPort
 	if os.Getenv("NANNY_API_PORT") != "" {
@@ -95,14 +101,14 @@ func main() {
 	if githubRedirectURL == "" {
 		githubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", port)
 	}
-	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService, refreshTokenService, nannyEncryptionKey, jwtSecret)
+	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService, refreshTokenService, nannyEncryptionKey, jwtSecret, frontendHost)
 
 	// Create server with Gemini client
 	srv := server.NewServer(geminiClient, githubAuth, userService, agentService, chatService, tokenService, refreshTokenService, jwtSecret, nannyEncryptionKey)
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:8081", "https://nannyai.harshanu.space"},
+		AllowedOrigins:   []string{"http://localhost:8081", "https://nannyai.dev"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Access-Control-Allow-Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,

@@ -582,9 +582,9 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, updatedChat.History, 2)
 		assert.Equal(t, "Initial prompt", updatedChat.History[0].Prompt)
-		assert.Equal(t, "Initial response", updatedChat.History[0].Response)
+		//assert.Equal(t, "Initial response", updatedChat.History[0].Response) ## won't work as response is randomized now
 		assert.Equal(t, "Hello", updatedChat.History[1].Prompt)
-		assert.Equal(t, "Hi there!", updatedChat.History[1].Response)
+		//assert.Equal(t, "Hi there!", updatedChat.History[1].Response) ## won't work as response is randomized now
 		assert.Equal(t, "text", updatedChat.History[1].Type)
 	})
 

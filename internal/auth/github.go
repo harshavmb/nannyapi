@@ -26,6 +26,7 @@ type GitHubAuth struct {
 	refreshTokenService *token.RefreshTokenService
 	nannyEncryptionKey  string
 	jwtSecret           string
+	frontEndHost        string
 }
 
 func (g *GitHubAuth) generateStateString() (string, error) {
@@ -47,7 +48,7 @@ func (g *GitHubAuth) generateStateString() (string, error) {
 // The "Authorization callback URL" you set there must match the redirect URL
 // you use in your code.  For local testing, something like
 // "http://localhost:8080/github/callback" is typical.
-func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user.UserService, refreshTokenService *token.RefreshTokenService, nannyEncryptionKey, jwtSecret string) *GitHubAuth {
+func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user.UserService, refreshTokenService *token.RefreshTokenService, nannyEncryptionKey, jwtSecret, frontEndHost string) *GitHubAuth {
 	return &GitHubAuth{
 		oauthConf: &oauth2.Config{
 			ClientID:     clientID,
@@ -61,6 +62,7 @@ func NewGitHubAuth(clientID, clientSecret, redirectURL string, userService *user
 		refreshTokenService: refreshTokenService,
 		nannyEncryptionKey:  nannyEncryptionKey,
 		jwtSecret:           jwtSecret,
+		frontEndHost:        frontEndHost,
 	}
 }
 
@@ -107,12 +109,13 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 			Expires:  time.Now().Add(time.Hour),
 			HttpOnly: true,
 			Path:     "/",
+			Secure:   true,
 			SameSite: http.SameSiteLaxMode,
 		})
 
 		// Redirect to the profile page
 		//http.Redirect(w, r, "/github/profile", http.StatusSeeOther)
-		http.Redirect(w, r, "http://localhost:8081/dashboard", http.StatusSeeOther)
+		http.Redirect(w, r, fmt.Sprintf("%s/%s", g.frontEndHost, "dashboard"), http.StatusSeeOther)
 	}
 }
 
