@@ -89,7 +89,7 @@ go run ./cmd/main.go
 The API endpoints are documented using Swagger. You can view the Swagger UI by navigating to:
 
 ```
-https://nannyai.harshanu.space/swagger/index.html
+https://nannyai.dev/swagger/index.html
 ```
 
 (Replace with `localhost:8080` if you are testing locally.)

@@ -11,7 +11,7 @@ const docTemplate = `{
         "title": "{{.Title}}",
         "contact": {
             "name": "API Support",
-            "url": "https://nannyai.harshanu.space/support",
+            "url": "https://nannyai.dev/support",
             "email": "harsha@harshanu.space"
         },
         "license": {

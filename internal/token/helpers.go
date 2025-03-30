@@ -18,7 +18,7 @@ import (
 const (
 	// Alphanumeric characters for token generation
 	alphanumeric = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	Issuer       = "https://nannyai.harshanu.space"
+	Issuer       = "https://nannyai.dev"
 )
 
 // GenerateRandomString generates a random string of the specified length using alphanumeric characters.
