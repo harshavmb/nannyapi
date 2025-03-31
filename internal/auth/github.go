@@ -73,12 +73,17 @@ func (g *GitHubAuth) HandleGitHubLogin() http.HandlerFunc {
 			http.Error(w, "Failed to generate state", http.StatusInternalServerError)
 			return
 		}
+
+		// set secure flag to true if the request is coming from https
+		secure := r.TLS != nil
+
 		http.SetCookie(w, &http.Cookie{
 			Name:     "oauthstate",
 			Value:    state,
 			Expires:  time.Now().Add(1 * time.Hour),
 			HttpOnly: true,
 			Path:     "/", // Ensure the cookie is sent with the callback request
+			Secure:   secure,
 			SameSite: http.SameSiteLaxMode,
 		})
 		url := g.oauthConf.AuthCodeURL(state, oauth2.AccessTypeOffline)
@@ -102,6 +107,9 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 			return
 		}
 
+		// set secure flag to true if the request is coming from https
+		secure := r.TLS != nil
+
 		// Store the token in a cookie
 		http.SetCookie(w, &http.Cookie{
 			Name:     "GH_Authorization",
@@ -109,7 +117,7 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 			Expires:  time.Now().Add(time.Hour),
 			HttpOnly: true,
 			Path:     "/",
-			Secure:   true,
+			Secure:   secure,
 			SameSite: http.SameSiteLaxMode,
 		})
 
@@ -263,6 +271,9 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			"refresh_token": refreshToken,
 		}
 
+		// set secure flag to true if the request is coming from https
+		secure := r.TLS != nil
+
 		// Store the refresh_token in a http-only cookie
 		http.SetCookie(w, &http.Cookie{
 			Name:     "refresh_token",
@@ -270,6 +281,7 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			Expires:  time.Now().Add(7 * 24 * time.Hour),
 			HttpOnly: true,
 			Path:     "/",
+			Secure:   secure,
 			SameSite: http.SameSiteLaxMode,
 		})
 
