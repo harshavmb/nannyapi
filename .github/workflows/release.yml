@@ -24,9 +24,9 @@ jobs:
         id: create_tag
         run: |
           git fetch --tags
-          if [ -z "$(git tag -l "v$(date +'%Y.%m.%d')")" ]; then
-            git tag "v$(date +'%Y.%m.%d')"
-            git push origin "v$(date +'%Y.%m.%d')"
+          if [ -z "$(git tag -l "v1.0.0-$(date +'%Y%m%d')")" ]; then
+            git tag "v1.0.0-$(date +'%Y%m%d')"
+            git push origin "v1.0.0-$(date +'%Y%m%d')"
           fi    
       # More assembly might be required: Docker logins, GPG, etc.
       # It all depends on your needs.
