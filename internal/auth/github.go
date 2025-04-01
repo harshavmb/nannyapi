@@ -114,7 +114,7 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 		// just for test env
 		var sameSite http.SameSite
 		if strings.Contains(g.frontEndHost, "test") {
-			sameSite = http.SameSiteLaxMode
+			sameSite = http.SameSiteNoneMode
 		} else {
 			sameSite = http.SameSiteLaxMode
 		}
@@ -287,7 +287,7 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 		// just for test env
 		var sameSite http.SameSite
 		if strings.Contains(g.frontEndHost, "test") {
-			sameSite = http.SameSiteLaxMode
+			sameSite = http.SameSiteNoneMode
 		} else {
 			sameSite = http.SameSiteLaxMode
 		}
