@@ -1,0 +1,18 @@
+version: 2
+
+builds:
+  - main: ./cmd/
+  
+release:
+  # Repo in which the release will be created.
+  # Default: extracted from the origin remote URL or empty if its private hosted.
+  github:
+    owner: harshavmb
+    name: nannyapi
+  draft: false
+  prerelease: false
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
