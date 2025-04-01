@@ -30,7 +30,7 @@ jobs:
         id: create_tag
         run: |
           git fetch --tags
-          TAG="v1.0.0-$(date +'%Y%m%d%s')"
+          TAG="v1.0.0-$(date +'%Y%m%d')"
           if [ -z "$(git tag -l "$TAG")" ]; then
             git tag "$TAG"
             git push origin "$TAG"
@@ -40,7 +40,7 @@ jobs:
           fi
       - name: Verify Tag Exists
         run: |
-          TAG="v1.0.0-$(date +'%Y%m%d%s')"
+          TAG="v1.0.0-$(date +'%Y%m%d')"
           if [ -z "$(git tag -l "$TAG")" ]; then
             echo "Tag $TAG does not exist. Exiting."
             exit 1
