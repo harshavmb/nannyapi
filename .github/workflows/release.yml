@@ -19,34 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.22
-      - name: Debug Git State
-        run: |
-           echo "Current Git tags:"
-           git tag
-           echo "Current Git branches:"
-           git branch -a
-      - name: Create Git Tag
-        id: create_tag
-        run: |
-          git fetch --tags
-          TAG="v1.0.0-$(date +'%Y%m%d')"
-          if [ -z "$(git tag -l "$TAG")" ]; then
-            git tag "$TAG"
-            git push origin "$TAG"
-            echo "Tag $TAG created and pushed."
-          else
-            echo "Tag $TAG already exists."
-          fi
-      - name: Verify Tag Exists
-        run: |
-          TAG="v1.0.0-$(date +'%Y%m%d')"
-          if [ -z "$(git tag -l "$TAG")" ]; then
-            echo "Tag $TAG does not exist. Exiting."
-            exit 1
-          else
-            echo "Tag $TAG exists."
-          fi
+          go-version: 1.22      
       # More assembly might be required: Docker logins, GPG, etc.
       # It all depends on your needs.
       - name: Run GoReleaser
