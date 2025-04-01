@@ -110,6 +110,15 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 		// set secure flag to true if the request is coming from https
 		secure := r.TLS != nil
 
+		// ugly workaround (just for testing, needs to go during shipping)
+		// just for test env
+		var sameSite http.SameSite
+		if strings.Contains(g.frontEndHost, "test") {
+			sameSite = http.SameSiteLaxMode
+		} else {
+			sameSite = http.SameSiteLaxMode
+		}
+
 		// Store the token in a cookie
 		http.SetCookie(w, &http.Cookie{
 			Name:     "GH_Authorization",
@@ -118,7 +127,7 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 			HttpOnly: true,
 			Path:     "/",
 			Secure:   secure,
-			SameSite: http.SameSiteLaxMode,
+			SameSite: sameSite,
 		})
 
 		// Redirect to the profile page
@@ -274,6 +283,15 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 		// set secure flag to true if the request is coming from https
 		secure := r.TLS != nil
 
+		// ugly workaround (just for testing, needs to go during shipping)
+		// just for test env
+		var sameSite http.SameSite
+		if strings.Contains(g.frontEndHost, "test") {
+			sameSite = http.SameSiteLaxMode
+		} else {
+			sameSite = http.SameSiteLaxMode
+		}
+
 		// Store the refresh_token in a http-only cookie
 		http.SetCookie(w, &http.Cookie{
 			Name:     "refresh_token",
@@ -282,7 +300,7 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 			HttpOnly: true,
 			Path:     "/",
 			Secure:   secure,
-			SameSite: http.SameSiteLaxMode,
+			SameSite: sameSite,
 		})
 
 		w.Header().Set("Content-Type", "application/json")
