@@ -10,3 +10,7 @@ release:
     owner: harshavmb
     name: nannyapi
   draft: false
+  prerelease: false
+
+snapshot:
+  name_template: "{{ .Tag }}-{{ .ShortCommit }}"
