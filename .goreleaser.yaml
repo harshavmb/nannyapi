@@ -6,3 +6,4 @@ release:
   github:
     owner: harshavmb
     name: nannyapi
+    draft: false
