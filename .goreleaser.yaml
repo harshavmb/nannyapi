@@ -2,10 +2,11 @@ version: 2
 
 builds:
   - main: ./cmd/
+  
 release:
   # Repo in which the release will be created.
   # Default: extracted from the origin remote URL or empty if its private hosted.
   github:
     owner: harshavmb
     name: nannyapi
-    draft: false    
+  draft: false
