@@ -27,7 +27,9 @@ jobs:
           if [ -z "$(git tag -l "v1.0.0-$(date +'%Y%m%d')")" ]; then
             git tag "v1.0.0-$(date +'%Y%m%d')"
             git push origin "v1.0.0-$(date +'%Y%m%d')"
-          fi    
+          else
+            echo "Tag already exists"
+          fi
       # More assembly might be required: Docker logins, GPG, etc.
       # It all depends on your needs.
       - name: Run GoReleaser
