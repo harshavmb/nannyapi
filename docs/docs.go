@@ -123,7 +123,7 @@ const docTemplate = `{
                         }
                     },
                     "500": {
-                        "description": "Failed to retrieve agents info",
+                        "description": "Failed to create agent",
                         "schema": {
                             "type": "string"
                         }
@@ -168,6 +168,47 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Failed to retrieve agents info",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth-token": {
+            "post": {
+                "description": "Creates auth token (aka API key) for the authenticated user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-token"
+                ],
+                "summary": "Creates auth token (aka API key) for the authenticated user",
+                "responses": {
+                    "201": {
+                        "description": "id of the inserted token",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to create API key",
                         "schema": {
                             "type": "string"
                         }
@@ -235,7 +276,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/server.AuthTokenData"
+                                "$ref": "#/definitions/token.Token"
                             }
                         }
                     },
@@ -700,20 +741,6 @@ const docTemplate = `{
                 }
             }
         },
-        "server.AuthTokenData": {
-            "type": "object",
-            "properties": {
-                "createdAt": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "maskedToken": {
-                    "type": "string"
-                }
-            }
-        },
         "server.chatRequest": {
             "type": "object",
             "properties": {
@@ -746,6 +773,29 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "token.Token": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "hashed_token": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "retrieved": {
+                    "type": "boolean"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "user_id": {
                     "type": "string"
                 }
             }

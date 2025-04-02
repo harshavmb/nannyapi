@@ -67,8 +67,8 @@ func (r *TokenRepository) GetTokensByUser(ctx context.Context, userID string) ([
 	return tokens, nil
 }
 
-func (r *TokenRepository) GetToken(ctx context.Context, tokenString string) (*Token, error) {
-	filter := bson.M{"token": tokenString}
+func (r *TokenRepository) GetToken(ctx context.Context, tokenId bson.ObjectID) (*Token, error) {
+	filter := bson.M{"_id": tokenId}
 	var token Token
 	err := r.collection.FindOne(ctx, filter).Decode(&token)
 	if err != nil {
@@ -93,8 +93,8 @@ func (r *TokenRepository) GetTokenByHashedToken(ctx context.Context, hashedToken
 	return &token, nil
 }
 
-func (r *TokenRepository) DeleteToken(ctx context.Context, hashedToken string) error {
-	filter := bson.M{"hashed_token": hashedToken}
+func (r *TokenRepository) DeleteToken(ctx context.Context, tokenID bson.ObjectID) error {
+	filter := bson.M{"_id": tokenID}
 
 	_, err := r.collection.DeleteOne(ctx, filter)
 	if err != nil {

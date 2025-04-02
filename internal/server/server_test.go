@@ -122,23 +122,100 @@ func setupServer(t *testing.T) (*Server, func(), string, string) {
 	return server, cleanup, staticToken.Token, accessToken
 }
 
-func TestHandleDeleteAuthToken_NoAuth(t *testing.T) {
-	server, cleanup, _, _ := setupServer(t)
+func TestHandleDeleteAuthToken(t *testing.T) {
+	server, cleanup, _, accessToken := setupServer(t)
 	defer cleanup()
 
-	tokenID := bson.NewObjectID().Hex()
-	req, err := http.NewRequest("DELETE", fmt.Sprintf("/api/auth-tokens/%s", tokenID), nil)
-	if err != nil {
-		t.Fatalf("Could not create request: %v", err)
-	}
+	t.Run("ValidRequest", func(t *testing.T) {
+		// create the token
+		testTokenObj := token.Token{
+			UserID: "123456",
+			Token:  "adfadsfdsfdsfadsf",
+		}
 
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, req)
+		tokenCreated, err := server.tokenService.CreateToken(context.Background(), testTokenObj, server.nannyEncryptionKey)
+		if err != nil {
+			log.Fatalf("error while creating token: %v", err)
+		}
 
-	if status := recorder.Code; status != http.StatusUnauthorized {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusUnauthorized)
-	}
+		// Delete the token
+		req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/%s", "/api/auth-token", tokenCreated.ID.Hex()), nil)
+		if err != nil {
+			t.Fatalf("Could not delete token: %v", err)
+		}
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+
+		// Create a test recorder
+		recorder := httptest.NewRecorder()
+
+		// Serve the request
+		server.ServeHTTP(recorder, req)
+
+		// Check the response status code
+		if recorder.Code != http.StatusOK {
+			t.Errorf("Expected status code %d, but got %d", http.StatusOK, recorder.Code)
+		}
+
+		// Check the response body
+		expected := `{"message":"Auth token deleted successfully"}`
+		actual := strings.TrimSpace(recorder.Body.String())
+		if !strings.Contains(actual, expected) {
+			t.Errorf("Expected body %q, but got %q", expected, actual)
+		}
+
+	})
+
+	t.Run("InValidRequest", func(t *testing.T) {
+		// create the token
+		testTokenObj := token.Token{
+			UserID: "123456",
+			Token:  "adfadsfdsfdsfadsf",
+		}
+
+		_, err := server.tokenService.CreateToken(context.Background(), testTokenObj, server.nannyEncryptionKey)
+		if err != nil {
+			log.Fatalf("error while creating token: %v", err)
+		}
+
+		// Delete the token that doesn't exist
+		req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/%s", "/api/auth-token", bson.NewObjectID().Hex()), nil) //sending an incorrect one
+		if err != nil {
+			t.Fatalf("Could not delete token: %v", err)
+		}
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+
+		// Create a test recorder
+		recorder := httptest.NewRecorder()
+
+		// Serve the request
+		server.ServeHTTP(recorder, req)
+
+		// Check the response status code
+		if recorder.Code != http.StatusNotFound {
+			t.Errorf("Expected status code %d, but got %d", http.StatusOK, recorder.Code)
+		}
+
+	})
+
+	t.Run("UserNotAuthenticated", func(t *testing.T) {
+		tokenID := bson.NewObjectID().Hex()
+		req, err := http.NewRequest("DELETE", fmt.Sprintf("/api/auth-tokens/%s", tokenID), nil)
+		if err != nil {
+			t.Fatalf("Could not create request: %v", err)
+		}
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		if status := recorder.Code; status != http.StatusUnauthorized {
+			t.Errorf("handler returned wrong status code: got %v want %v",
+				status, http.StatusUnauthorized)
+		}
+	})
 }
 
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
@@ -322,6 +399,69 @@ func TestHandleAgentInfoWithAccessToken(t *testing.T) {
 		// Create a test request with valid agent info
 		agentInfo := `{"hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"}`
 		req, err := http.NewRequest("POST", "/api/agent-info", strings.NewReader(agentInfo))
+		if err != nil {
+			t.Fatalf("Could not create request: %v", err)
+		}
+
+		// Create a test recorder
+		recorder := httptest.NewRecorder()
+
+		// Serve the request
+		server.ServeHTTP(recorder, req)
+
+		// Check the response status code
+		if recorder.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status code %d, but got %d", http.StatusUnauthorized, recorder.Code)
+		}
+	})
+}
+
+func TestHandleCreateAuthToken(t *testing.T) {
+	server, cleanup, _, accessToken := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		req, err := http.NewRequest("POST", "/api/auth-token", nil)
+		if err != nil {
+			t.Fatalf("Could not create request: %v", err)
+		}
+
+		// Set a valid Authorization header
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+
+		// Create a test recorder
+		recorder := httptest.NewRecorder()
+
+		// Serve the request
+		server.ServeHTTP(recorder, req)
+
+		// Check the response status code
+		if recorder.Code != http.StatusCreated {
+			t.Errorf("Expected status code %d, but got %d", http.StatusCreated, recorder.Code)
+		}
+
+		// Check the response body
+		var responseToken token.Token
+		err = json.NewDecoder(recorder.Body).Decode(&responseToken)
+		if err != nil {
+			t.Fatalf("Could not decode response body: %v", err)
+		}
+
+		id := responseToken.ID.Hex()
+
+		if _, err := bson.ObjectIDFromHex(id); err != nil {
+			t.Errorf("Expected 'id' field to be a valid ObjectID, but got %v", id)
+		}
+
+		// Verify the token is same by checking the hash
+		tokenHash := token.HashToken(responseToken.Token)
+		assert.Equal(t, responseToken.HashedToken, tokenHash)
+	})
+
+	t.Run("UserNotAuthenticated", func(t *testing.T) {
+		// Create a test request with valid token info
+		requestToken := fmt.Sprintf(`{"user_id":"123456","token":"%s"}`, "abcdcadscds") // token model
+		req, err := http.NewRequest("POST", "/api/auth-token", strings.NewReader(requestToken))
 		if err != nil {
 			t.Fatalf("Could not create request: %v", err)
 		}
