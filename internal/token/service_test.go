@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -98,13 +99,28 @@ func TestTokenService(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Delete tokens by hashedToken
-		err = service.DeleteToken(context.Background(), result.HashedToken)
+		err = service.DeleteToken(context.Background(), result.ID)
 		assert.NoError(t, err)
 
 		// Try to find a non-existent token
 		tokens, err := service.GetAllTokens(context.Background(), token.UserID)
 		assert.NoError(t, err)
 		assert.Nil(t, tokens)
+	})
+
+	t.Run("DeleteIncorrectToken", func(t *testing.T) {
+		// Insert a token
+		token := Token{
+			UserID: GenerateRandomString(6),
+			Token:  GenerateRandomString(10),
+		}
+
+		_, err := service.CreateToken(context.Background(), token, encryptionKey)
+		assert.NoError(t, err)
+
+		// Delete tokens by hashedToken
+		err = service.DeleteToken(context.Background(), bson.NewObjectID())
+		assert.Error(t, err)
 	})
 }
 

@@ -39,15 +39,6 @@ definitions:
         description: '"commands" or "text"'
         type: string
     type: object
-  server.AuthTokenData:
-    properties:
-      createdAt:
-        type: string
-      id:
-        type: string
-      maskedToken:
-        type: string
-    type: object
   server.chatRequest:
     properties:
       chat:
@@ -69,6 +60,21 @@ definitions:
   server.part:
     properties:
       text:
+        type: string
+    type: object
+  token.Token:
+    properties:
+      created_at:
+        type: string
+      hashed_token:
+        type: string
+      id:
+        type: string
+      retrieved:
+        type: boolean
+      token:
+        type: string
+      user_id:
         type: string
     type: object
 info:
@@ -145,7 +151,7 @@ paths:
           schema:
             type: string
         "500":
-          description: Failed to retrieve agents info
+          description: Failed to create agent
           schema:
             type: string
       summary: Ingest agent information
@@ -180,6 +186,33 @@ paths:
       summary: Ingest agent information
       tags:
       - agent-info
+  /api/auth-token:
+    post:
+      description: Creates auth token (aka API key) for the authenticated user.
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: id of the inserted token
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid request payload
+          schema:
+            type: string
+        "401":
+          description: User not authenticated
+          schema:
+            type: string
+        "500":
+          description: Failed to create API key
+          schema:
+            type: string
+      summary: Creates auth token (aka API key) for the authenticated user
+      tags:
+      - auth-token
   /api/auth-token/{id}:
     delete:
       description: Deletes a specific auth token by ID.
@@ -219,7 +252,7 @@ paths:
           description: Successfully retrieved auth tokens
           schema:
             items:
-              $ref: '#/definitions/server.AuthTokenData'
+              $ref: '#/definitions/token.Token'
             type: array
         "401":
           description: User not authenticated

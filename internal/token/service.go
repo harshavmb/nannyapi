@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
@@ -43,7 +44,7 @@ func (s *TokenService) CreateToken(ctx context.Context, token Token, encryptionK
 	token.Token = encryptedToken
 	token.HashedToken = hashedToken
 	token.CreatedAt = time.Now()
-	token.Retrieved = false
+	token.Retrieved = true // cannot implement now, really required?
 
 	log.Printf("Static token created by user %s", token.UserID)
 
@@ -71,14 +72,28 @@ func (s *TokenService) GetTokenByHashedToken(ctx context.Context, hashedToken st
 }
 
 // DeleteToken deletes a static token
-func (s *TokenService) DeleteToken(ctx context.Context, hashedToken string) error {
-	err := s.tokenRepo.DeleteToken(ctx, hashedToken)
-
+func (s *TokenService) DeleteToken(ctx context.Context, tokenID bson.ObjectID) error {
+	// this is necessary to confirm token is deleted
+	// and to return the correct response to client
+	errorMsg := fmt.Errorf("error while deleting token %s", tokenID.Hex())
+	token, err := s.tokenRepo.GetToken(ctx, tokenID)
 	if err != nil {
-		return fmt.Errorf("failed to delete static token with hash %s: %v", hashedToken, err)
+		if err == mongo.ErrNoDocuments {
+			return fmt.Errorf("invalid token passed %s", tokenID.Hex())
+		}
+		return errorMsg
 	}
 
-	log.Printf("Static token  %s deleted", hashedToken)
+	if token != nil {
+		err := s.tokenRepo.DeleteToken(ctx, tokenID)
+		if err != nil {
+			return errorMsg
+		}
+	} else {
+		return errorMsg
+	}
+
+	log.Printf("Static token  %s deleted", tokenID.Hex())
 	return nil
 }
 

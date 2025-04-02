@@ -40,12 +40,6 @@ type Server struct {
 	nannyEncryptionKey  string
 }
 
-type AuthTokenData struct {
-	ID          string `json:"id"`
-	MaskedToken string `json:"maskedToken"`
-	CreatedAt   string `json:"createdAt"`
-}
-
 // startChat starts a chat session with the model using the given history.
 func (s *Server) startChat(hist []content) *genai.ChatSession {
 	model := s.geminiClient.Model()
@@ -101,7 +95,7 @@ func (s *Server) routes() {
 
 	// API endoints with token authentication
 	apiMux := http.NewServeMux()
-	//apiMux.HandleFunc("POST /api/auth-token", s.handleCreateAuthToken())
+	apiMux.HandleFunc("POST /api/auth-token", s.handleCreateAuthToken())
 	apiMux.HandleFunc("/api/auth-tokens", s.handleGetAuthTokens())
 	apiMux.Handle("/api/user-auth-token", s.handleFetchUserInfoFromToken())
 	apiMux.Handle("GET /api/user/{param}", s.handleFetchUserInfo())
@@ -327,8 +321,6 @@ func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
 			return
 		}
 
-		log.Printf("User info found in context: %s", userID)
-
 		json.NewEncoder(w).Encode(userID)
 	}
 }
@@ -429,12 +421,62 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+// handleCreateAuthToken creates auth token (aka API key) for the authenticated user.
+// @Summary Creates auth token (aka API key) for the authenticated user
+// @Description Creates auth token (aka API key) for the authenticated user.
+// @Tags auth-token
+// @Produce json
+// @Success 201 {object} map[string]string "id of the inserted token"
+// @Failure 400 {string} string "Invalid request payload"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 500 {string} string "Failed to create API key"
+// @Router /api/auth-token [post]
+func (s *Server) handleCreateAuthToken() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user info is already in the cookie
+		userID, ok := GetUserFromContext(r)
+		if !ok {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		// set token.Token model
+		var authToken token.Token
+		tokenString := token.GenerateRandomString(33) // 33 characters as it was before
+
+		authToken.UserID = userID
+		authToken.Token = tokenString
+
+		// Create API key for the user
+		responseToken, err := s.tokenService.CreateToken(r.Context(), authToken, s.nannyEncryptionKey)
+		if err != nil || responseToken == nil {
+			log.Printf("Failed to create API key: %v", err)
+			http.Error(w, "Failed to create API key", http.StatusInternalServerError)
+			return
+		}
+
+		// Decrypt the token before sent to client
+		decryptedToken, err := token.Decrypt(responseToken.Token, s.nannyEncryptionKey)
+		if err != nil {
+			log.Printf("Failed to decrypt Token: %v", err)
+			http.Error(w, "Failed to create API key", http.StatusInternalServerError)
+			return
+		}
+		responseToken.Token = decryptedToken
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(responseToken)
+	}
+}
+
 // handleGetAuthTokens retrieves all auth tokens for the authenticated user.
 // @Summary Get all auth tokens
 // @Description Retrieves all auth tokens for the authenticated user.
 // @Tags auth-tokens
 // @Produce json
-// @Success 200 {array} AuthTokenData "Successfully retrieved auth tokens"
+// @Success 200 {array} token.Token "Successfully retrieved auth tokens"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to retrieve auth tokens"
 // @Router /api/auth-tokens [get]
@@ -457,16 +499,26 @@ func (s *Server) handleGetAuthTokens() http.HandlerFunc {
 			return
 		}
 
-		var authTokenDataList []AuthTokenData
-		for _, token := range authTokens {
+		// decrypt all token keys
+		var unencryptedTokens []*token.Token
+		for _, innerToken := range authTokens {
+			// Create a copy of the innerToken
+			newToken := *innerToken
 
-			authTokenDataList = append(authTokenDataList, AuthTokenData{
-				ID:          token.ID.Hex(),
-				MaskedToken: token.Token,
-				CreatedAt:   token.CreatedAt.String(),
-			})
+			// Unencrytping the token now
+			newTokenStr, err := token.Decrypt(newToken.Token, s.nannyEncryptionKey)
+			if err != nil {
+				log.Printf("Failed to retrieve auth tokens: %v", err)
+				http.Error(w, "Failed to retrieve auth tokens", http.StatusInternalServerError)
+				return
+			}
+			newToken.Token = newTokenStr
+
+			// Append the modified copy to the new slice
+			unencryptedTokens = append(unencryptedTokens, &newToken)
 		}
-		json.NewEncoder(w).Encode(authTokenDataList)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(unencryptedTokens)
 	}
 }
 
@@ -505,16 +557,20 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 			return
 		}
 
-		// Delete the auth token
-		// won't work needs a fix
-		err = s.tokenService.DeleteToken(r.Context(), objID.String())
+		err = s.tokenService.DeleteToken(r.Context(), objID)
 		if err != nil {
-			log.Printf("Failed to delete auth token of user %s: %v", userID, err)
+			// non-existant token passed
+			if strings.Contains(err.Error(), "invalid token passed") {
+				http.Error(w, "Failed to delete auth token", http.StatusNotFound)
+				return
+			}
+			log.Printf("Failed to delete %s auth token of user %s: %v", tokenID, userID, err)
 			http.Error(w, "Failed to delete auth token", http.StatusInternalServerError)
 			return
 		}
 
 		// Return success response
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"message": "Auth token deleted successfully"})
 	}
 }
@@ -529,7 +585,7 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 // @Success 201 {object} map[string]string "id of the inserted agent info"
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
-// @Failure 500 {string} string "Failed to retrieve agents info"
+// @Failure 500 {string} string "Failed to create agent"
 // @Router /api/agent-infos [post]
 func (s *Server) handleAgentInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
