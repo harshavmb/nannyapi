@@ -11,6 +11,7 @@ import (
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/server"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
@@ -103,8 +104,22 @@ func main() {
 	}
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService, refreshTokenService, nannyEncryptionKey, jwtSecret, frontendHost)
 
+	// Initialize the diagnostic service
+	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
+
 	// Create server with Gemini client
-	srv := server.NewServer(geminiClient, githubAuth, userService, agentService, chatService, tokenService, refreshTokenService, jwtSecret, nannyEncryptionKey)
+	srv := server.NewServer(
+		geminiClient,
+		githubAuth,
+		userService,
+		agentService,
+		chatService,
+		tokenService,
+		refreshTokenService,
+		diagnosticService, // Add diagnostic service
+		jwtSecret,
+		nannyEncryptionKey,
+	)
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{

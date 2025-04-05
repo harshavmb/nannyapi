@@ -17,6 +17,7 @@ import (
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
@@ -81,8 +82,11 @@ func setupServer(t *testing.T) (*Server, func(), string, string) {
 	mockTokenService := token.NewTokenService(tokenRepository)
 	mockRefreshTokenService := token.NewRefreshTokenService(refreshTokenRepository)
 
+	// Initialize the diagnostic service
+	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
+
 	// Create a new server instance
-	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, jwtSecret, encryptionKey)
+	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, diagnosticService, jwtSecret, encryptionKey)
 
 	// Create a valid auth token for the test user
 	testUser := &user.User{

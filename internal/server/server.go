@@ -14,6 +14,7 @@ import (
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/api"
@@ -33,11 +34,24 @@ type Server struct {
 	chatService         *chat.ChatService
 	tokenService        *token.TokenService
 	refreshTokenservice *token.RefreshTokenService
+	diagnosticService   *diagnostic.DiagnosticService
 	nannyAPIPort        string
 	nannySwaggerURL     string
 	gitHubRedirectURL   string
 	jwtSecret           string
 	nannyEncryptionKey  string
+}
+
+// StartDiagnosticRequest represents a request to start a diagnostic session
+type StartDiagnosticRequest struct {
+	ChatID     string            `json:"chat_id"`
+	Issue      string            `json:"issue"`
+	SystemInfo map[string]string `json:"system_info"`
+}
+
+// ContinueDiagnosticRequest represents a request to continue a diagnostic session
+type ContinueDiagnosticRequest struct {
+	Results []string `json:"results"`
 }
 
 // startChat starts a chat session with the model using the given history.
@@ -49,7 +63,7 @@ func (s *Server) startChat(hist []content) *genai.ChatSession {
 }
 
 // NewServer creates a new Server instance
-func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, jwtSecret, nannyEncryptionKey string) *Server {
+func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, diagnosticService *diagnostic.DiagnosticService, jwtSecret, nannyEncryptionKey string) *Server {
 	mux := http.NewServeMux()
 
 	// override default nanny API port if NANNY_API_PORT is set
@@ -71,7 +85,7 @@ func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, user
 		gitHubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", nannyAPIPort) // Default GitHubCallback URL
 	}
 
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret, nannyEncryptionKey: nannyEncryptionKey}
+	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, diagnosticService: diagnosticService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret, nannyEncryptionKey: nannyEncryptionKey}
 	server.routes()
 	return server
 }
@@ -108,6 +122,12 @@ func (s *Server) routes() {
 	apiMux.HandleFunc("PUT /api/chat/{id}", s.handleAddPromptResponse())
 	apiMux.HandleFunc("GET /api/chat/", s.handleGetChatByID())
 	apiMux.HandleFunc("GET /api/chat/{id}", s.handleGetChatByID())
+
+	// Diagnostic Endpoints
+	apiMux.HandleFunc("POST /api/diagnostic", s.handleStartDiagnostic())
+	apiMux.HandleFunc("POST /api/diagnostic/{id}/continue", s.handleContinueDiagnostic())
+	apiMux.HandleFunc("GET /api/diagnostic/{id}", s.handleGetDiagnostic())
+	apiMux.HandleFunc("GET /api/diagnostic/{id}/summary", s.handleGetDiagnosticSummary())
 
 	// Create a new CORS handler
 	c := cors.New(cors.Options{
@@ -878,5 +898,144 @@ func (s *Server) handleGetChatByID() http.HandlerFunc {
 		}
 
 		json.NewEncoder(w).Encode(chat)
+	}
+}
+
+// handleStartDiagnostic initiates a new diagnostic session
+// @Summary Start a new diagnostic session
+// @Description Start a new Linux system diagnostic session
+// @Tags diagnostic
+// @Accept json
+// @Produce json
+// @Param request body diagnostic.DiagnosticRequest true "Diagnostic request"
+// @Success 201 {object} diagnostic.DiagnosticSession
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic [post]
+func (s *Server) handleStartDiagnostic() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req diagnostic.DiagnosticRequest
+		if err := parseRequestJSON(r, &req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		session, err := s.diagnosticService.StartDiagnosticSession(r.Context(), req.Issue, req.SystemInfo)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to start diagnostic session: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(session)
+	}
+}
+
+// handleContinueDiagnostic continues an existing diagnostic session
+// @Summary Continue a diagnostic session
+// @Description Continue an existing Linux system diagnostic session
+// @Tags diagnostic
+// @Accept json
+// @Produce json
+// @Param id path string true "Session ID"
+// @Param results body []string true "Command results"
+// @Success 200 {object} diagnostic.DiagnosticSession
+// @Failure 400 {string} string "Invalid request"
+// @Failure 404 {string} string "Session not found"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic/{id}/continue [post]
+func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		var results []string
+		if err := parseRequestJSON(r, &results); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		session, err := s.diagnosticService.ContinueDiagnosticSession(r.Context(), sessionID, results)
+		if err != nil {
+			statusCode := http.StatusInternalServerError
+			if err.Error() == "session not found: "+sessionID {
+				statusCode = http.StatusNotFound
+			}
+			http.Error(w, err.Error(), statusCode)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(session)
+	}
+}
+
+// handleGetDiagnostic retrieves a diagnostic session
+// @Summary Get diagnostic session
+// @Description Get details of a diagnostic session
+// @Tags diagnostic
+// @Produce json
+// @Param id path string true "Session ID"
+// @Success 200 {object} diagnostic.DiagnosticSession
+// @Failure 404 {string} string "Session not found"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic/{id} [get]
+func (s *Server) handleGetDiagnostic() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		session, err := s.diagnosticService.GetDiagnosticSession(r.Context(), sessionID)
+		if err != nil {
+			statusCode := http.StatusInternalServerError
+			if err.Error() == "session not found: "+sessionID {
+				statusCode = http.StatusNotFound
+			}
+			http.Error(w, err.Error(), statusCode)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(session)
+	}
+}
+
+// handleGetDiagnosticSummary retrieves a diagnostic session summary
+// @Summary Get diagnostic summary
+// @Description Get a summary of the diagnostic session
+// @Tags diagnostic
+// @Produce json
+// @Param id path string true "Session ID"
+// @Success 200 {string} string "Diagnostic summary"
+// @Failure 404 {string} string "Session not found"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic/{id}/summary [get]
+func (s *Server) handleGetDiagnosticSummary() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		summary, err := s.diagnosticService.GetDiagnosticSummary(r.Context(), sessionID)
+		if err != nil {
+			statusCode := http.StatusInternalServerError
+			if err.Error() == "session not found: "+sessionID {
+				statusCode = http.StatusNotFound
+			}
+			http.Error(w, err.Error(), statusCode)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(summary))
 	}
 }
