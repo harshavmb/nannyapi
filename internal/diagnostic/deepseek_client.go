@@ -15,6 +15,7 @@ const (
 	baseURL          = "https://api.deepseek.com/v1"
 	initialMaxTokens = 500  // Increased from 100 to handle full command responses
 	fullMaxTokens    = 2048 // For detailed analysis responses
+	temparature      = 0.2
 )
 
 // DeepSeekClient handles interactions with the DeepSeek API
@@ -94,9 +95,10 @@ func (c *DeepSeekClient) DiagnoseIssue(req *DiagnosticRequest) (*DiagnosticRespo
 	resp, err := c.client.CreateChatCompletion(
 		c.ctx,
 		openai.ChatCompletionRequest{
-			Model:     model,
-			Messages:  messages,
-			MaxTokens: maxTokens,
+			Model:       model,
+			Messages:    messages,
+			MaxTokens:   maxTokens,
+			Temperature: temparature,
 		},
 	)
 	if err != nil {
