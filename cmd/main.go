@@ -95,7 +95,7 @@ func main() {
 	refreshTokenService := token.NewRefreshTokenService(refreshTokenRepo)
 	agentService := agent.NewAgentInfoService(agentInfoRepo)
 	chatService := chat.NewChatService(chatRepo, agentService)
-	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepo)
+	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepo, agentService)
 
 	// Initialize GitHub OAuth
 	githubClientID := os.Getenv("GH_CLIENT_ID")

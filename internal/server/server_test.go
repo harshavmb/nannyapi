@@ -82,7 +82,7 @@ func setupServer(t *testing.T) (*Server, func(), string, string) {
 	chatService := chat.NewChatService(ChatRepository, agentInfoservice)
 	mockTokenService := token.NewTokenService(tokenRepository)
 	mockRefreshTokenService := token.NewRefreshTokenService(refreshTokenRepository)
-	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepository)
+	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepository, agentInfoservice)
 
 	// Create a new server instance
 	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, diagnosticService, jwtSecret, encryptionKey)

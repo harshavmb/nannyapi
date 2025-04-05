@@ -2,6 +2,8 @@ package diagnostic
 
 import (
 	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // DiagnosticCommand represents a Linux command with timeout
@@ -38,7 +40,9 @@ type DiagnosticRequest struct {
 
 // DiagnosticSession tracks the state of a diagnostic session
 type DiagnosticSession struct {
-	ID               string               `json:"id" bson:"_id"`
+	ID               bson.ObjectID        `json:"id" bson:"_id,omitempty"`
+	AgentID          string               `json:"agent_id" bson:"agent_id"`
+	UserID           string               `json:"user_id" bson:"user_id"`
 	InitialIssue     string               `json:"initial_issue" bson:"initial_issue"`
 	CurrentIteration int                  `json:"current_iteration" bson:"current_iteration"`
 	MaxIterations    int                  `json:"max_iterations" bson:"max_iterations"`

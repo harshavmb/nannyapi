@@ -20,12 +20,12 @@ func NewDiagnosticRepository(db *mongo.Database) *DiagnosticRepository {
 	}
 }
 
-func (r *DiagnosticRepository) CreateSession(ctx context.Context, session *DiagnosticSession) error {
-	_, err := r.collection.InsertOne(ctx, session)
+func (r *DiagnosticRepository) CreateSession(ctx context.Context, session *DiagnosticSession) (bson.ObjectID, error) {
+	result, err := r.collection.InsertOne(ctx, session)
 	if err != nil {
-		return fmt.Errorf("failed to create diagnostic session: %v", err)
+		return bson.ObjectID{}, fmt.Errorf("failed to create diagnostic session: %v", err)
 	}
-	return nil
+	return result.InsertedID.(bson.ObjectID), nil
 }
 
 func (r *DiagnosticRepository) UpdateSession(ctx context.Context, session *DiagnosticSession) error {
@@ -38,12 +38,12 @@ func (r *DiagnosticRepository) UpdateSession(ctx context.Context, session *Diagn
 	return nil
 }
 
-func (r *DiagnosticRepository) GetSession(ctx context.Context, sessionID string) (*DiagnosticSession, error) {
+func (r *DiagnosticRepository) GetSession(ctx context.Context, sessionID bson.ObjectID) (*DiagnosticSession, error) {
 	var session DiagnosticSession
 	err := r.collection.FindOne(ctx, bson.M{"_id": sessionID}).Decode(&session)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("session not found: %s", sessionID)
+			return nil, fmt.Errorf("session not found: %s", sessionID.Hex())
 		}
 		return nil, fmt.Errorf("failed to get diagnostic session: %v", err)
 	}
@@ -63,4 +63,16 @@ func (r *DiagnosticRepository) ListSessions(ctx context.Context, filter bson.M) 
 		return nil, fmt.Errorf("failed to decode diagnostic sessions: %v", err)
 	}
 	return sessions, nil
+}
+
+func (r *DiagnosticRepository) DeleteSession(ctx context.Context, sessionID bson.ObjectID) error {
+	filter := bson.M{"_id": sessionID}
+	result, err := r.collection.DeleteOne(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("failed to delete diagnostic session: %v", err)
+	}
+	if result.DeletedCount == 0 {
+		return fmt.Errorf("session not found: %s", sessionID.Hex())
+	}
+	return nil
 }

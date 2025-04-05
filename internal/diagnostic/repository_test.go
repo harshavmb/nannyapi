@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -47,7 +48,6 @@ func TestDiagnosticRepository(t *testing.T) {
 
 	// Create a test session
 	session := &DiagnosticSession{
-		ID:               "test_session",
 		InitialIssue:     "High CPU usage",
 		CurrentIteration: 0,
 		MaxIterations:    3,
@@ -58,30 +58,31 @@ func TestDiagnosticRepository(t *testing.T) {
 	}
 
 	// Test CreateSession
-	err := repo.CreateSession(context.Background(), session)
+	sessionID, err := repo.CreateSession(context.Background(), session)
 	assert.NoError(t, err)
 
 	// Test GetSession
-	retrievedSession, err := repo.GetSession(context.Background(), session.ID)
+	retrievedSession, err := repo.GetSession(context.Background(), sessionID)
 	assert.NoError(t, err)
-	assert.Equal(t, session.ID, retrievedSession.ID)
+	assert.Equal(t, sessionID, retrievedSession.ID)
 	assert.Equal(t, session.InitialIssue, retrievedSession.InitialIssue)
 	assert.Equal(t, len(session.History), len(retrievedSession.History))
 
 	// Test UpdateSession
 	session.CurrentIteration = 1
 	session.Status = "completed"
+	session.ID = sessionID
 	err = repo.UpdateSession(context.Background(), session)
 	assert.NoError(t, err)
 
 	// Verify update
-	updatedSession, err := repo.GetSession(context.Background(), session.ID)
+	updatedSession, err := repo.GetSession(context.Background(), sessionID)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, updatedSession.CurrentIteration)
 	assert.Equal(t, "completed", updatedSession.Status)
 
 	// Test non-existent session
-	_, err = repo.GetSession(context.Background(), "non_existent_id")
+	_, err = repo.GetSession(context.Background(), bson.NewObjectID())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "session not found")
 }

@@ -128,6 +128,8 @@ func (s *Server) routes() {
 	apiMux.HandleFunc("POST /api/diagnostic/{id}/continue", s.handleContinueDiagnostic())
 	apiMux.HandleFunc("GET /api/diagnostic/{id}", s.handleGetDiagnostic())
 	apiMux.HandleFunc("GET /api/diagnostic/{id}/summary", s.handleGetDiagnosticSummary())
+	apiMux.HandleFunc("DELETE /api/diagnostic/{id}", s.handleDeleteDiagnostic())
+	apiMux.HandleFunc("GET /api/diagnostics", s.handleListDiagnostics())
 
 	// Create a new CORS handler
 	c := cors.New(cors.Options{
@@ -910,23 +912,42 @@ func (s *Server) handleGetChatByID() http.HandlerFunc {
 // @Param request body diagnostic.DiagnosticRequest true "Diagnostic request"
 // @Success 201 {object} diagnostic.DiagnosticSession
 // @Failure 400 {string} string "Invalid request"
+// @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Internal server error"
 // @Router /api/diagnostic [post]
 func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req diagnostic.DiagnosticRequest
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user is authenticated
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		var req struct {
+			AgentID    string            `json:"agent_id"`
+			Issue      string            `json:"issue"`
+			SystemInfo map[string]string `json:"system_info"`
+		}
+
 		if err := parseRequestJSON(r, &req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		session, err := s.diagnosticService.StartDiagnosticSession(r.Context(), req.Issue, req.SystemInfo)
+		if req.AgentID == "" || req.Issue == "" {
+			http.Error(w, "Agent ID and Issue are required", http.StatusBadRequest)
+			return
+		}
+
+		session, err := s.diagnosticService.StartDiagnosticSession(r.Context(), req.AgentID, userID, req.Issue, req.SystemInfo)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to start diagnostic session: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(session)
 	}
@@ -1037,5 +1058,80 @@ func (s *Server) handleGetDiagnosticSummary() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte(summary))
+	}
+}
+
+// handleDeleteDiagnostic deletes a diagnostic session
+// @Summary Delete a diagnostic session
+// @Description Delete a diagnostic session and its associated data
+// @Tags diagnostic
+// @Produce json
+// @Param id path string true "Session ID"
+// @Success 200 {string} string "Session deleted successfully"
+// @Failure 400 {string} string "Invalid session ID"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 403 {string} string "User not authorized"
+// @Failure 404 {string} string "Session not found"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic/{id} [delete]
+func (s *Server) handleDeleteDiagnostic() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if user is authenticated
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		err := s.diagnosticService.DeleteSession(r.Context(), sessionID, userID)
+		if err != nil {
+			statusCode := http.StatusInternalServerError
+			if err.Error() == "session not found: "+sessionID {
+				statusCode = http.StatusNotFound
+			} else if err.Error() == "user does not own this session" {
+				statusCode = http.StatusForbidden
+			}
+			http.Error(w, err.Error(), statusCode)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Session deleted successfully"})
+	}
+}
+
+// handleListDiagnostics lists diagnostic sessions for the authenticated user
+// @Summary List diagnostic sessions
+// @Description List all diagnostic sessions for the authenticated user
+// @Tags diagnostic
+// @Produce json
+// @Success 200 {array} diagnostic.DiagnosticSession
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostics [get]
+func (s *Server) handleListDiagnostics() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user is authenticated
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		sessions, err := s.diagnosticService.ListUserSessions(r.Context(), userID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to list sessions: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(sessions)
 	}
 }

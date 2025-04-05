@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"mime"
 	"net/http"
 	"regexp"
@@ -106,20 +105,6 @@ func generateHistory(prompts, responses, types []string) []chat.PromptResponse {
 	return history
 }
 
-func getAgentResponse(r *http.Request) string {
-	// Read JSON from the request body (agent's output)
-	var agentOutput struct {
-		Output string `json:"output"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&agentOutput); err != nil {
-		//Handle error appropriately
-		log.Printf("Error decoding agent's response: %v", err)
-		return "" // Or an error message
-	}
-	return agentOutput.Output
-}
-
 func extractGeminiFeedback(res *genai.GenerateContentResponse) string {
 	// Extract the Gemini's feedback from the response
 	var geminiFeedback string
@@ -186,11 +171,6 @@ func generateAccessToken(userID, jwtSecret string) (string, error) {
 		return "", err
 	}
 	return accessToken, nil
-}
-
-func (s *Server) deleteRefreshToken(ctx context.Context, tokenString string) error {
-	hashedToken := token.HashToken(tokenString)
-	return s.refreshTokenservice.DeleteRefreshToken(ctx, hashedToken)
 }
 
 func (s *Server) validateRefreshToken(ctx context.Context, tokenString, jwtSecret string) (bool, *token.Claims, error) {
