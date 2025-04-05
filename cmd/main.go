@@ -82,17 +82,20 @@ func main() {
 		port = os.Getenv("NANNY_API_PORT")
 	}
 
-	// Initialize User Repository and Service
+	// Initialize repositories and services
 	userRepo := user.NewUserRepository(mongoDB)
 	agentInfoRepo := agent.NewAgentInfoRepository(mongoDB)
 	tokenRepo := token.NewTokenRepository(mongoDB)
 	refreshTokenRepo := token.NewRefreshTokenRepository(mongoDB)
 	chatRepo := chat.NewChatRepository(mongoDB)
+	diagnosticRepo := diagnostic.NewDiagnosticRepository(mongoDB)
+
 	userService := user.NewUserService(userRepo)
 	tokenService := token.NewTokenService(tokenRepo)
 	refreshTokenService := token.NewRefreshTokenService(refreshTokenRepo)
 	agentService := agent.NewAgentInfoService(agentInfoRepo)
 	chatService := chat.NewChatService(chatRepo, agentService)
+	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepo)
 
 	// Initialize GitHub OAuth
 	githubClientID := os.Getenv("GH_CLIENT_ID")
@@ -104,9 +107,6 @@ func main() {
 	}
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService, refreshTokenService, nannyEncryptionKey, jwtSecret, frontendHost)
 
-	// Initialize the diagnostic service
-	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
-
 	// Create server with Gemini client
 	srv := server.NewServer(
 		geminiClient,
@@ -116,7 +116,7 @@ func main() {
 		chatService,
 		tokenService,
 		refreshTokenService,
-		diagnosticService, // Add diagnostic service
+		diagnosticService,
 		jwtSecret,
 		nannyEncryptionKey,
 	)

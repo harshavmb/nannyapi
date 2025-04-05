@@ -8,6 +8,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func setupTestService(t *testing.T) (*DiagnosticService, func()) {
+	client, cleanup := setupTestDB(t)
+	repo := NewDiagnosticRepository(client.Database(testDBName))
+
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		t.Fatal("DEEPSEEK_API_KEY environment variable is required")
+	}
+
+	service := NewDiagnosticService(apiKey, repo)
+	return service, cleanup
+}
+
 // mockDiagnosticResponse creates a mock response for testing
 func mockDiagnosticResponse() *DiagnosticResponse {
 	return &DiagnosticResponse{
@@ -24,17 +37,19 @@ func mockDiagnosticResponse() *DiagnosticResponse {
 }
 
 func TestNewDiagnosticService(t *testing.T) {
-	// Initialize the diagnostic service
-	service := NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
+	service, cleanup := setupTestService(t)
+	defer cleanup()
+
 	assert.NotNil(t, service)
 	assert.NotNil(t, service.client)
-	assert.NotNil(t, service.sessions)
+	assert.NotNil(t, service.repository)
 	assert.Equal(t, 3, service.maxIterations)
 }
 
 func TestStartDiagnosticSession(t *testing.T) {
+	service, cleanup := setupTestService(t)
+	defer cleanup()
 
-	service := NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
 	issue := "High CPU usage"
 	systemInfo := map[string]string{
 		"OS":     "Ubuntu 22.04",
@@ -45,11 +60,7 @@ func TestStartDiagnosticSession(t *testing.T) {
 
 	session, err := service.StartDiagnosticSession(context.Background(), issue, systemInfo)
 	if err != nil {
-		t.Logf("Got error starting session: %v", err)
-		// Even with an error, we should still create a session
-		assert.NotNil(t, session)
-		assert.Equal(t, issue, session.InitialIssue)
-		return
+		t.Fatalf("Failed to start diagnostic session: %v", err)
 	}
 
 	assert.NotEmpty(t, session.ID)
@@ -58,12 +69,19 @@ func TestStartDiagnosticSession(t *testing.T) {
 	assert.Equal(t, 3, session.MaxIterations)
 	assert.Equal(t, "in_progress", session.Status)
 	assert.NotEmpty(t, session.History)
+
+	// Verify session was stored in MongoDB
+	storedSession, err := service.GetDiagnosticSession(context.Background(), session.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, session.ID, storedSession.ID)
+	assert.Equal(t, session.InitialIssue, storedSession.InitialIssue)
 }
 
 func TestContinueDiagnosticSession(t *testing.T) {
-	service := NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
+	service, cleanup := setupTestService(t)
+	defer cleanup()
 
-	// Start a session first
+	// Create an initial session
 	initialSession := &DiagnosticSession{
 		ID:               "test_session_1",
 		InitialIssue:     "High CPU usage",
@@ -73,7 +91,8 @@ func TestContinueDiagnosticSession(t *testing.T) {
 		History:          []DiagnosticResponse{*mockDiagnosticResponse()},
 	}
 
-	service.sessions[initialSession.ID] = initialSession
+	err := service.repository.CreateSession(context.Background(), initialSession)
+	assert.NoError(t, err)
 
 	// Continue the session with command results
 	results := []string{
@@ -83,43 +102,23 @@ func TestContinueDiagnosticSession(t *testing.T) {
 
 	continuedSession, err := service.ContinueDiagnosticSession(context.Background(), initialSession.ID, results)
 	if err != nil {
-		t.Logf("Got error continuing session: %v", err)
-		// Verify the session still exists and was updated
-		assert.NotNil(t, continuedSession)
-		assert.Equal(t, initialSession.ID, continuedSession.ID)
-		return
+		t.Fatalf("Failed to continue diagnostic session: %v", err)
 	}
 
 	assert.Equal(t, 1, continuedSession.CurrentIteration)
 	assert.NotEmpty(t, continuedSession.History)
 	assert.Equal(t, "in_progress", continuedSession.Status)
-}
 
-func TestGetDiagnosticSession(t *testing.T) {
-	service := NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
-
-	// Create a test session
-	testSession := &DiagnosticSession{
-		ID:               "test_session_2",
-		InitialIssue:     "High CPU usage",
-		CurrentIteration: 0,
-		MaxIterations:    3,
-		Status:           "in_progress",
-		History:          []DiagnosticResponse{*mockDiagnosticResponse()},
-	}
-
-	service.sessions[testSession.ID] = testSession
-
-	// Retrieve the session
-	retrievedSession, err := service.GetDiagnosticSession(context.Background(), testSession.ID)
+	// Verify session was updated in MongoDB
+	storedSession, err := service.GetDiagnosticSession(context.Background(), initialSession.ID)
 	assert.NoError(t, err)
-	assert.NotNil(t, retrievedSession)
-	assert.Equal(t, testSession.ID, retrievedSession.ID)
-	assert.Equal(t, testSession.InitialIssue, retrievedSession.InitialIssue)
+	assert.Equal(t, continuedSession.CurrentIteration, storedSession.CurrentIteration)
+	assert.Equal(t, len(continuedSession.History), len(storedSession.History))
 }
 
 func TestSessionMaxIterations(t *testing.T) {
-	service := NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
+	service, cleanup := setupTestService(t)
+	defer cleanup()
 
 	// Create a test session
 	session := &DiagnosticSession{
@@ -131,7 +130,8 @@ func TestSessionMaxIterations(t *testing.T) {
 		History:          []DiagnosticResponse{*mockDiagnosticResponse()},
 	}
 
-	service.sessions[session.ID] = session
+	err := service.repository.CreateSession(context.Background(), session)
+	assert.NoError(t, err)
 
 	results := []string{"Sample command output"}
 
@@ -140,18 +140,24 @@ func TestSessionMaxIterations(t *testing.T) {
 		var err error
 		session, err = service.ContinueDiagnosticSession(context.Background(), session.ID, results)
 		if err != nil {
-			t.Logf("Got error in iteration %d: %v", i, err)
-			continue
+			t.Fatalf("Failed in iteration %d: %v", i, err)
 		}
 	}
 
 	assert.Equal(t, "completed", session.Status)
 	assert.Equal(t, 3, session.CurrentIteration)
 	assert.NotEmpty(t, session.History)
+
+	// Verify final state in MongoDB
+	storedSession, err := service.GetDiagnosticSession(context.Background(), session.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, "completed", storedSession.Status)
+	assert.Equal(t, 3, storedSession.CurrentIteration)
 }
 
 func TestGetDiagnosticSummary(t *testing.T) {
-	service := NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
+	service, cleanup := setupTestService(t)
+	defer cleanup()
 
 	// Create a test session with history
 	session := &DiagnosticSession{
@@ -166,7 +172,8 @@ func TestGetDiagnosticSummary(t *testing.T) {
 		},
 	}
 
-	service.sessions[session.ID] = session
+	err := service.repository.CreateSession(context.Background(), session)
+	assert.NoError(t, err)
 
 	summary, err := service.GetDiagnosticSummary(context.Background(), session.ID)
 	assert.NoError(t, err)

@@ -3,23 +3,21 @@ package diagnostic
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 )
 
 // DiagnosticService manages diagnostic sessions and coordinates with DeepSeek API
 type DiagnosticService struct {
 	client        *DeepSeekClient
-	sessions      map[string]*DiagnosticSession
-	sessionsLock  sync.RWMutex
+	repository    *DiagnosticRepository
 	maxIterations int
 }
 
 // NewDiagnosticService creates a new diagnostic service
-func NewDiagnosticService(apiKey string) *DiagnosticService {
+func NewDiagnosticService(apiKey string, repository *DiagnosticRepository) *DiagnosticService {
 	return &DiagnosticService{
 		client:        NewDeepSeekClient(apiKey),
-		sessions:      make(map[string]*DiagnosticSession),
+		repository:    repository,
 		maxIterations: 3, // Default max iterations
 	}
 }
@@ -34,13 +32,13 @@ func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, issue st
 		Status:           "in_progress",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
-		History:          make([]DiagnosticResponse, 0), // Initialize empty history
+		History:          make([]DiagnosticResponse, 0),
 	}
 
 	// Store the session before making the API call
-	s.sessionsLock.Lock()
-	s.sessions[session.ID] = session
-	s.sessionsLock.Unlock()
+	if err := s.repository.CreateSession(ctx, session); err != nil {
+		return session, fmt.Errorf("failed to create session in database: %v", err)
+	}
 
 	req := &DiagnosticRequest{
 		Issue:      issue,
@@ -50,28 +48,31 @@ func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, issue st
 
 	resp, err := s.client.DiagnoseIssue(req)
 	if err != nil {
-		// Return the session even if API call fails
 		return session, fmt.Errorf("failed to start diagnostic session: %v", err)
 	}
 
 	session.History = append(session.History, *resp)
 	session.UpdatedAt = time.Now()
 
+	if err := s.repository.UpdateSession(ctx, session); err != nil {
+		return session, fmt.Errorf("failed to update session in database: %v", err)
+	}
+
 	return session, nil
 }
 
 // ContinueDiagnosticSession continues an existing diagnostic session with new results
 func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessionID string, results []string) (*DiagnosticSession, error) {
-	s.sessionsLock.RLock()
-	session, exists := s.sessions[sessionID]
-	s.sessionsLock.RUnlock()
-
-	if !exists {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+	session, err := s.repository.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("session not found: %s", err)
 	}
 
 	if session.CurrentIteration >= session.MaxIterations {
 		session.Status = "completed"
+		if err := s.repository.UpdateSession(ctx, session); err != nil {
+			return session, fmt.Errorf("failed to update session status: %v", err)
+		}
 		return session, nil
 	}
 
@@ -93,6 +94,9 @@ func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessi
 			session.Status = "completed"
 		}
 
+		if err := s.repository.UpdateSession(ctx, session); err != nil {
+			return session, fmt.Errorf("failed to update session: %v", err)
+		}
 		return session, fmt.Errorf("failed to continue diagnostic session: %v", err)
 	}
 
@@ -104,25 +108,21 @@ func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessi
 		session.Status = "completed"
 	}
 
-	return session, nil
-}
-
-// GetDiagnosticSession retrieves a diagnostic session by ID
-func (s *DiagnosticService) GetDiagnosticSession(ctx context.Context, sessionID string) (*DiagnosticSession, error) {
-	s.sessionsLock.RLock()
-	defer s.sessionsLock.RUnlock()
-
-	session, exists := s.sessions[sessionID]
-	if !exists {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+	if err := s.repository.UpdateSession(ctx, session); err != nil {
+		return session, fmt.Errorf("failed to update session: %v", err)
 	}
 
 	return session, nil
 }
 
+// GetDiagnosticSession retrieves a diagnostic session by ID
+func (s *DiagnosticService) GetDiagnosticSession(ctx context.Context, sessionID string) (*DiagnosticSession, error) {
+	return s.repository.GetSession(ctx, sessionID)
+}
+
 // GetDiagnosticSummary generates a summary of the diagnostic session
 func (s *DiagnosticService) GetDiagnosticSummary(ctx context.Context, sessionID string) (string, error) {
-	session, err := s.GetDiagnosticSession(ctx, sessionID)
+	session, err := s.repository.GetSession(ctx, sessionID)
 	if err != nil {
 		return "", err
 	}

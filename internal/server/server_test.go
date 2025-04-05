@@ -74,6 +74,7 @@ func setupServer(t *testing.T) (*Server, func(), string, string) {
 	refreshTokenRepository := token.NewRefreshTokenRepository(client.Database(testDBName))
 	agentInfoRepository := agent.NewAgentInfoRepository(client.Database(testDBName))
 	ChatRepository := chat.NewChatRepository(client.Database(testDBName))
+	diagnosticRepository := diagnostic.NewDiagnosticRepository(client.Database(testDBName))
 
 	// Mock Services
 	mockUserService := user.NewUserService(userRepository)
@@ -81,9 +82,7 @@ func setupServer(t *testing.T) (*Server, func(), string, string) {
 	chatService := chat.NewChatService(ChatRepository, agentInfoservice)
 	mockTokenService := token.NewTokenService(tokenRepository)
 	mockRefreshTokenService := token.NewRefreshTokenService(refreshTokenRepository)
-
-	// Initialize the diagnostic service
-	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"))
+	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepository)
 
 	// Create a new server instance
 	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, diagnosticService, jwtSecret, encryptionKey)
