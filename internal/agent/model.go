@@ -6,7 +6,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// SystemMetrics represents the current system metrics
+// SystemMetrics represents the current system metrics.
 type SystemMetrics struct {
 	CPUInfo     []string          `json:"cpu_info" bson:"cpu_info"`         // CPU information from /proc/cpuinfo
 	CPUUsage    float64           `json:"cpu_usage" bson:"cpu_usage"`       // Current CPU usage percentage
@@ -17,7 +17,7 @@ type SystemMetrics struct {
 	FSUsage     map[string]string `json:"fs_usage" bson:"fs_usage"`         // Filesystem usage percentages
 }
 
-// AgentInfo represents the information ingested by the agent
+// AgentInfo represents the information ingested by the agent.
 type AgentInfo struct {
 	ID            bson.ObjectID `json:"id" bson:"_id,omitempty"`
 	UserID        string        `json:"user_id" bson:"user_id"`

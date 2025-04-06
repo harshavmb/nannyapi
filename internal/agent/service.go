@@ -19,7 +19,7 @@ func NewAgentInfoService(repository *AgentInfoRepository) *AgentInfoService {
 	}
 }
 
-// SaveAgentInfo saves or updates agent information
+// SaveAgentInfo saves or updates agent information.
 func (s *AgentInfoService) SaveAgentInfo(ctx context.Context, info AgentInfo) (*mongo.InsertOneResult, error) {
 	// Check if agent exists
 	var existingAgent *AgentInfo
@@ -46,12 +46,12 @@ func (s *AgentInfoService) SaveAgentInfo(ctx context.Context, info AgentInfo) (*
 	return &mongo.InsertOneResult{InsertedID: info.ID}, nil
 }
 
-// GetAgentInfoByID retrieves agent information by ID
+// GetAgentInfoByID retrieves agent information by ID.
 func (s *AgentInfoService) GetAgentInfoByID(ctx context.Context, id bson.ObjectID) (*AgentInfo, error) {
 	return s.repository.GetAgentInfoByID(ctx, id)
 }
 
-// GetAgents retrieves agents by user ID
+// GetAgents retrieves agents by user ID.
 func (s *AgentInfoService) GetAgents(ctx context.Context, userID string) ([]*AgentInfo, error) {
 	agents, err := s.repository.GetAgents(ctx, userID)
 	if err != nil {
@@ -63,7 +63,7 @@ func (s *AgentInfoService) GetAgents(ctx context.Context, userID string) ([]*Age
 	return agents, nil
 }
 
-// HasSystemMetricsChanged checks if there are significant changes in system metrics
+// HasSystemMetricsChanged checks if there are significant changes in system metrics.
 func (s *AgentInfoService) HasSystemMetricsChanged(old, new SystemMetrics) bool {
 	// CPU usage change threshold (5%)
 	if abs(new.CPUUsage-old.CPUUsage) > 5.0 {
@@ -99,7 +99,7 @@ func (s *AgentInfoService) HasSystemMetricsChanged(old, new SystemMetrics) bool 
 	return false
 }
 
-// Helper function for absolute value of float64
+// Helper function for absolute value of float64.
 func abs(x float64) float64 {
 	if x < 0 {
 		return -x

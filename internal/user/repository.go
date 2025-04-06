@@ -90,7 +90,7 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (*Use
 	return &user, nil
 }
 
-// SHOULDN'T be used in this project as GitHub OAuth is used
+// SHOULDN'T be used in this project as GitHub OAuth is used.
 func (r *UserRepository) CreateUser(ctx context.Context, user *User) (*mongo.InsertOneResult, error) {
 	user.LastLoggedIn = time.Now()
 

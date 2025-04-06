@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/rs/cors"
+
 	"github.com/harshavmb/nannyapi/docs"
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
@@ -15,7 +17,6 @@ import (
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
 	"github.com/harshavmb/nannyapi/pkg/database"
-	"github.com/rs/cors"
 )
 
 const defaultPort = "8080"

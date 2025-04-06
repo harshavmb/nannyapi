@@ -14,22 +14,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
-	"github.com/stretchr/testify/assert"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const (
 	testDBName         = "test_db"
 	testCollectionName = "servers"
-	jwtSecret          = "d2a8b6aad8fb7d736508a520e2d53460054d21b14c1a8be86ec61e654ee807e6d47e167628bdeb59d7da25ac4de4ab1cbc161b2a335924b89e22fdac3bc44511e9fa896031b3154fd7365fe01c539ef5681ba70a65619eae8c7c14b832ea989d779d828a4e95e63181ae70ad0d855a40477144cc892097e0b0c0abfd5a26ce5f8bc0159bf44171a6dcd295aa810c4759ae0a0bc0f13b9f5872fd048ab9daa94c64d5e999dc7ea928f5a87731b468c25f2a67a6180f8f99bd9d38c706f9ca77f74e0929b5abec65c3b26d641f57a6c683a0770880748ebc5804ada5179a0252228b1a328898cae4a0d987767889251eda344cb45fd4725099de8f0947328a6166" //just for testing not used anywhere
+	jwtSecret          = "d2a8b6aad8fb7d736508a520e2d53460054d21b14c1a8be86ec61e654ee807e6d47e167628bdeb59d7da25ac4de4ab1cbc161b2a335924b89e22fdac3bc44511e9fa896031b3154fd7365fe01c539ef5681ba70a65619eae8c7c14b832ea989d779d828a4e95e63181ae70ad0d855a40477144cc892097e0b0c0abfd5a26ce5f8bc0159bf44171a6dcd295aa810c4759ae0a0bc0f13b9f5872fd048ab9daa94c64d5e999dc7ea928f5a87731b468c25f2a67a6180f8f99bd9d38c706f9ca77f74e0929b5abec65c3b26d641f57a6c683a0770880748ebc5804ada5179a0252228b1a328898cae4a0d987767889251eda344cb45fd4725099de8f0947328a6166" // just for testing not used anywhere
 	encryptionKey      = "T3byOVRJGt/25v6c6GC3wWkNKtL1WPuW5yVjCEnaHA8="                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     // Base64 encoded 32-byte key
 )
 
@@ -62,7 +63,6 @@ func setupServer(t *testing.T) (*Server, func(), token.Token, string) {
 
 	// Connect to test database
 	client, cleanup := setupTestDB(t)
-	//defer cleanup()
 
 	// Create a new Repository objects
 	userRepository := user.NewUserRepository(client.Database(testDBName))
@@ -188,7 +188,7 @@ func TestHandleDeleteAuthToken(t *testing.T) {
 		}
 
 		// Delete the token that doesn't exist
-		req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/%s", "/api/auth-token", bson.NewObjectID().Hex()), nil) //sending an incorrect one
+		req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/%s", "/api/auth-token", bson.NewObjectID().Hex()), nil) // sending an incorrect one
 		if err != nil {
 			t.Fatalf("Could not delete token: %v", err)
 		}
@@ -730,9 +730,9 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, updatedChat.History, 2)
 		assert.Equal(t, "Initial prompt", updatedChat.History[0].Prompt)
-		//assert.Equal(t, "Initial response", updatedChat.History[0].Response) ## won't work as response is randomized now
+		// assert.Equal(t, "Initial response", updatedChat.History[0].Response) ## won't work as response is randomized now
 		assert.Equal(t, "Hello", updatedChat.History[1].Prompt)
-		//assert.Equal(t, "Hi there!", updatedChat.History[1].Response) ## won't work as response is randomized now
+		// assert.Equal(t, "Hi there!", updatedChat.History[1].Response) ## won't work as response is randomized now
 		assert.Equal(t, "text", updatedChat.History[1].Type)
 	})
 
@@ -1780,8 +1780,12 @@ func TestHandleGetDiagnosticSummary(t *testing.T) {
 		server.ServeHTTP(recorder, req)
 
 		assert.Equal(t, http.StatusOK, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), "High CPU usage")
-		assert.Contains(t, recorder.Body.String(), "Diagnostic Summary")
+		
+		var response map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&response)
+		assert.NoError(t, err)
+		assert.Contains(t, response["summary"], "High CPU usage")
+		assert.Contains(t, response["summary"], "Diagnostic Summary")
 	})
 
 	t.Run("NonExistentSession", func(t *testing.T) {

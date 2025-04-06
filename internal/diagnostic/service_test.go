@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/v2/bson"
+
+	"github.com/harshavmb/nannyapi/internal/agent"
 )
 
 func setupTestService(t *testing.T) (*DiagnosticService, func(), string, string) {
@@ -58,7 +59,7 @@ func setupTestService(t *testing.T) (*DiagnosticService, func(), string, string)
 	return service, cleanup, insertResult.InsertedID.(bson.ObjectID).Hex(), testUserID
 }
 
-// mockDiagnosticResponse creates a mock response for testing
+// mockDiagnosticResponse creates a mock response for testing.
 func mockDiagnosticResponse() *DiagnosticResponse {
 	return &DiagnosticResponse{
 		DiagnosisType: "cpu",
@@ -318,7 +319,7 @@ func TestDeleteSession(t *testing.T) {
 	assert.Contains(t, err.Error(), "session not found")
 }
 
-// analyzeNegativeResponse checks if the response matches expected unsupported case patterns
+// analyzeNegativeResponse checks if the response matches expected unsupported case patterns.
 func analyzeNegativeResponse(response string, caseType string) bool {
 	response = strings.ToLower(response)
 	switch caseType {
@@ -364,7 +365,7 @@ func analyzeNegativeResponse(response string, caseType string) bool {
 	return false
 }
 
-// getTermVariations returns common variations of diagnostic terms
+// getTermVariations returns common variations of diagnostic terms.
 func getTermVariations(term string) []string {
 	variations := []string{term}
 	switch term {
@@ -394,7 +395,7 @@ func getTermVariations(term string) []string {
 	return variations
 }
 
-// matchDiagnosticTerms checks if a sufficient percentage of relevant terms are present
+// matchDiagnosticTerms checks if a sufficient percentage of relevant terms are present.
 func matchDiagnosticTerms(t *testing.T, text string, expectedTerms []string, requiredMatchPercentage float64) bool {
 	text = strings.ToLower(text)
 	var matchedTerms []string
@@ -579,7 +580,7 @@ func TestComplexTCPNetworkDiagnosticScenario(t *testing.T) {
 	assert.Equal(t, "network", lastResponse.DiagnosisType)
 }
 
-// TestNegativeDiagnosticScenarios tests cases where the system should recognize limitations
+// TestNegativeDiagnosticScenarios tests cases where the system should recognize limitations.
 func TestNegativeDiagnosticScenarios(t *testing.T) {
 	service, cleanup, agentID, userID := setupTestService(t)
 	defer cleanup()

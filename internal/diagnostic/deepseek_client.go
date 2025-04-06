@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/sashabaranov/go-openai"
+
+	"github.com/harshavmb/nannyapi/internal/agent"
 )
 
 const (
@@ -19,13 +20,13 @@ const (
 	temparature      = 0.2
 )
 
-// DeepSeekClient handles interactions with the DeepSeek API
+// DeepSeekClient handles interactions with the DeepSeek API.
 type DeepSeekClient struct {
 	client *openai.Client
 	ctx    context.Context
 }
 
-// NewDeepSeekClient creates a new DeepSeek API client
+// NewDeepSeekClient creates a new DeepSeek API client.
 func NewDeepSeekClient(apiKey string) *DeepSeekClient {
 	config := openai.DefaultConfig(apiKey)
 	config.BaseURL = baseURL
@@ -36,7 +37,7 @@ func NewDeepSeekClient(apiKey string) *DeepSeekClient {
 	}
 }
 
-// buildSystemPrompt creates the system prompt for Linux diagnostics
+// buildSystemPrompt creates the system prompt for Linux diagnostics.
 func (c *DeepSeekClient) buildSystemPrompt() string {
 	return `You are a Linux expert specializing in system diagnostics. Return ONLY JSON following this schema:
 {
@@ -94,7 +95,7 @@ General Rules:
 5. For unsupported cases, use EXACT phrases as specified above`
 }
 
-// buildUserPrompt creates the user prompt with diagnostic context
+// buildUserPrompt creates the user prompt with diagnostic context.
 func (c *DeepSeekClient) buildUserPrompt(req *DiagnosticRequest) string {
 	if req.Iteration > 0 && len(req.CommandResults) > 0 {
 		var analysisGuidance string
@@ -218,7 +219,7 @@ func (c *DeepSeekClient) buildUserPrompt(req *DiagnosticRequest) string {
 	)
 }
 
-// extractPID extracts process ID from command results
+// extractPID extracts process ID from command results.
 func extractPID(results []string) string {
 	for _, line := range results {
 		if strings.Contains(line, "PID") {
@@ -233,7 +234,7 @@ func extractPID(results []string) string {
 	return "N/A"
 }
 
-// detectProcessType tries to determine the type of process (java, python, etc)
+// detectProcessType tries to determine the type of process (java, python, etc).
 func detectProcessType(results []string) string {
 	processInfo := strings.ToLower(strings.Join(results, " "))
 	switch {
@@ -246,7 +247,7 @@ func detectProcessType(results []string) string {
 	}
 }
 
-// DiagnoseIssue sends a diagnostic request to DeepSeek API
+// DiagnoseIssue sends a diagnostic request to DeepSeek API.
 func (c *DeepSeekClient) DiagnoseIssue(req *DiagnosticRequest) (*DiagnosticResponse, error) {
 	messages := []openai.ChatCompletionMessage{
 		{
@@ -300,7 +301,7 @@ func (c *DeepSeekClient) DiagnoseIssue(req *DiagnosticRequest) (*DiagnosticRespo
 	return &diagnosticResp, nil
 }
 
-// extractJSONContent extracts JSON content from potential markdown formatting
+// extractJSONContent extracts JSON content from potential markdown formatting.
 func extractJSONContent(content string) string {
 	// Find content between triple backticks if present
 	if start := strings.Index(content, "```json"); start != -1 {
@@ -322,7 +323,7 @@ func extractJSONContent(content string) string {
 	return strings.TrimSpace(content)
 }
 
-// determineSeverity determines the severity based on system metrics and diagnosis type
+// determineSeverity determines the severity based on system metrics and diagnosis type.
 func determineSeverity(metrics *agent.SystemMetrics, diagnosisType string) string {
 	if metrics == nil {
 		return "medium" // Default if no metrics available

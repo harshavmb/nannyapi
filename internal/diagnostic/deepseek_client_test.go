@@ -3,8 +3,9 @@ package diagnostic
 import (
 	"testing"
 
-	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/harshavmb/nannyapi/internal/agent"
 )
 
 func TestBuildSystemPrompt(t *testing.T) {

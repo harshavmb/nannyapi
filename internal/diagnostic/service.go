@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/harshavmb/nannyapi/internal/agent"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/harshavmb/nannyapi/internal/agent"
 )
 
-// DiagnosticService manages diagnostic sessions and coordinates with DeepSeek API
+// DiagnosticService manages diagnostic sessions and coordinates with DeepSeek API.
 type DiagnosticService struct {
 	client        *DeepSeekClient
 	repository    *DiagnosticRepository
@@ -18,7 +19,7 @@ type DiagnosticService struct {
 	maxIterations int
 }
 
-// NewDiagnosticService creates a new diagnostic service
+// NewDiagnosticService creates a new diagnostic service.
 func NewDiagnosticService(apiKey string, repository *DiagnosticRepository, agentService *agent.AgentInfoService) *DiagnosticService {
 	return &DiagnosticService{
 		client:        NewDeepSeekClient(apiKey),
@@ -28,7 +29,7 @@ func NewDiagnosticService(apiKey string, repository *DiagnosticRepository, agent
 	}
 }
 
-// StartDiagnosticSession initiates a new diagnostic session
+// StartDiagnosticSession initiates a new diagnostic session.
 func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, agentID string, userID string, issue string) (*DiagnosticSession, error) {
 	// Validate agent exists
 	agentObjectID, err := bson.ObjectIDFromHex(agentID)
@@ -96,7 +97,7 @@ func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, agentID 
 	return session, nil
 }
 
-// ContinueDiagnosticSession continues an existing diagnostic session with new results
+// ContinueDiagnosticSession continues an existing diagnostic session with new results.
 func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessionID string, results []string) (*DiagnosticSession, error) {
 	id, err := bson.ObjectIDFromHex(sessionID)
 	if err != nil {
@@ -176,7 +177,7 @@ func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessi
 	return session, nil
 }
 
-// DeleteSession deletes a diagnostic session and all its associated data
+// DeleteSession deletes a diagnostic session and all its associated data.
 func (s *DiagnosticService) DeleteSession(ctx context.Context, sessionID string, userID string) error {
 	id, err := bson.ObjectIDFromHex(sessionID)
 	if err != nil {
@@ -205,13 +206,13 @@ func (s *DiagnosticService) DeleteSession(ctx context.Context, sessionID string,
 	return nil
 }
 
-// ListUserSessions returns all diagnostic sessions for a user
+// ListUserSessions returns all diagnostic sessions for a user.
 func (s *DiagnosticService) ListUserSessions(ctx context.Context, userID string) ([]*DiagnosticSession, error) {
 	filter := bson.M{"user_id": userID}
 	return s.repository.ListSessions(ctx, filter)
 }
 
-// GetDiagnosticSession retrieves a diagnostic session by ID
+// GetDiagnosticSession retrieves a diagnostic session by ID.
 func (s *DiagnosticService) GetDiagnosticSession(ctx context.Context, sessionID string) (*DiagnosticSession, error) {
 	id, err := bson.ObjectIDFromHex(sessionID)
 	if err != nil {
@@ -228,7 +229,7 @@ func (s *DiagnosticService) GetDiagnosticSession(ctx context.Context, sessionID 
 	return session, nil
 }
 
-// GetDiagnosticSummary generates a summary of the diagnostic session
+// GetDiagnosticSummary generates a summary of the diagnostic session.
 func (s *DiagnosticService) GetDiagnosticSummary(ctx context.Context, sessionID string) (string, error) {
 	id, err := bson.ObjectIDFromHex(sessionID)
 	if err != nil {

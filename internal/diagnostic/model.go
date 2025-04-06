@@ -3,23 +3,24 @@ package diagnostic
 import (
 	"time"
 
-	"github.com/harshavmb/nannyapi/internal/agent"
 	"go.mongodb.org/mongo-driver/v2/bson"
+
+	"github.com/harshavmb/nannyapi/internal/agent"
 )
 
-// DiagnosticCommand represents a Linux command with timeout
+// DiagnosticCommand represents a Linux command with timeout.
 type DiagnosticCommand struct {
 	Command        string `json:"command" bson:"command"`
 	TimeoutSeconds int    `json:"timeout_seconds" bson:"timeout_seconds"`
 }
 
-// LogCheck represents a log file check with grep pattern
+// LogCheck represents a log file check with grep pattern.
 type LogCheck struct {
 	LogPath     string `json:"log_path" bson:"log_path"`
 	GrepPattern string `json:"grep_pattern" bson:"grep_pattern"`
 }
 
-// DiagnosticResponse represents the response from DeepSeek API
+// DiagnosticResponse represents the response from DeepSeek API.
 type DiagnosticResponse struct {
 	DiagnosisType  string               `json:"diagnosis_type" bson:"diagnosis_type"`
 	Commands       []DiagnosticCommand  `json:"commands" bson:"commands"`
@@ -33,7 +34,7 @@ type DiagnosticResponse struct {
 	Impact         string               `json:"impact,omitempty" bson:"impact,omitempty"`
 }
 
-// DiagnosticRequest represents a Linux system diagnostic request
+// DiagnosticRequest represents a Linux system diagnostic request.
 type DiagnosticRequest struct {
 	Issue           string               `json:"issue" bson:"issue"`
 	SystemMetrics   *agent.SystemMetrics `json:"system_metrics" bson:"system_metrics"`
@@ -43,7 +44,7 @@ type DiagnosticRequest struct {
 	PreviousResults []string             `json:"previous_results,omitempty" bson:"previous_results,omitempty"`
 }
 
-// DiagnosticSession tracks the state of a diagnostic session
+// DiagnosticSession tracks the state of a diagnostic session.
 type DiagnosticSession struct {
 	ID               bson.ObjectID        `json:"id" bson:"_id,omitempty"`
 	AgentID          string               `json:"agent_id" bson:"agent_id"`

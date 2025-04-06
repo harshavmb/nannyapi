@@ -13,10 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/harshavmb/nannyapi/internal/token"
-	"github.com/harshavmb/nannyapi/internal/user"
 	"golang.org/x/oauth2"
 	githubOAuth2 "golang.org/x/oauth2/github"
+
+	"github.com/harshavmb/nannyapi/internal/token"
+	"github.com/harshavmb/nannyapi/internal/user"
 )
 
 type GitHubAuth struct {
@@ -122,7 +123,7 @@ func (g *GitHubAuth) HandleGitHubCallback() http.HandlerFunc {
 		})
 
 		// Redirect to the profile page
-		//http.Redirect(w, r, "/github/profile", http.StatusSeeOther)
+		// http.Redirect(w, r, "/github/profile", http.StatusSeeOther)
 		http.Redirect(w, r, fmt.Sprintf("%s/%s", g.frontEndHost, "dashboard"), http.StatusSeeOther)
 	}
 }
@@ -149,7 +150,11 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 				refreshTokenResponse := map[string]interface{}{
 					"refresh_token": refreshTokenCookie.Value,
 				}
-				json.NewEncoder(w).Encode(refreshTokenResponse)
+				if err := json.NewEncoder(w).Encode(refreshTokenResponse); err != nil {
+					log.Printf("Failed to encode refresh token response: %v", err)
+					http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+					return
+				}
 				return // we don't execute further to avoid more DB calls
 			} else {
 				log.Printf("Existing refresh token is invalid: %v", err)
@@ -287,7 +292,11 @@ func (g *GitHubAuth) HandleGitHubProfile() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode auth response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 

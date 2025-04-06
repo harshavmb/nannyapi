@@ -21,7 +21,7 @@ type GitHubEmail struct {
 	Verified bool   `json:"verified"`
 }
 
-// AgentInfo represents the information ingested by the agent
+// AgentInfo represents the information ingested by the agent.
 type AgentInfo struct {
 	ID            bson.ObjectID `json:"id" bson:"_id,omitempty"`
 	Email         string        `json:"email" bson:"email"`

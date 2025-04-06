@@ -10,19 +10,20 @@ import (
 
 	"encoding/json"
 
+	"github.com/rs/cors"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
-	"github.com/rs/cors"
-	httpSwagger "github.com/swaggo/http-swagger/v2"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-// Server represents the HTTP server
+// Server represents the HTTP server.
 type Server struct {
 	mux                 *http.ServeMux
 	githubAuth          *auth.GitHubAuth
@@ -39,19 +40,19 @@ type Server struct {
 	nannyEncryptionKey  string
 }
 
-// StartDiagnosticRequest represents a request to start a diagnostic session
+// StartDiagnosticRequest represents a request to start a diagnostic session.
 type StartDiagnosticRequest struct {
 	ChatID     string            `json:"chat_id"`
 	Issue      string            `json:"issue"`
 	SystemInfo map[string]string `json:"system_info"`
 }
 
-// ContinueDiagnosticRequest represents a request to continue a diagnostic session
+// ContinueDiagnosticRequest represents a request to continue a diagnostic session.
 type ContinueDiagnosticRequest struct {
 	Results []string `json:"results"`
 }
 
-// NewServer creates a new Server instance
+// NewServer creates a new Server instance.
 func NewServer(githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, diagnosticService *diagnostic.DiagnosticService, jwtSecret, nannyEncryptionKey string) *Server {
 	mux := http.NewServeMux()
 
@@ -79,7 +80,7 @@ func NewServer(githubAuth *auth.GitHubAuth, userService *user.UserService, agent
 	return server
 }
 
-// routes defines the routes for the server
+// routes defines the routes for the server.
 func (s *Server) routes() {
 
 	s.mux.HandleFunc("/status", s.handleStatus())
@@ -144,7 +145,6 @@ func (s *Server) routes() {
 
 	// Wrap the API mux with the CORS handler
 	s.mux.Handle("/api/", c.Handler(s.AuthMiddleware(apiMux)))
-	//s.mux.Handle("/", c.Handler(s.AuthMiddleware(http.HandlerFunc(s.handleIndex()))))
 
 }
 
@@ -159,7 +159,7 @@ func (s *Server) routes() {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to create refresh token"
-// @Router /api/refresh-token [post]
+// @Router /api/refresh-token [post].
 func (s *Server) handleRefreshToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Retrieve refresh token from cookies
@@ -233,7 +233,11 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 		// Write response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode refresh token response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -258,7 +262,7 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 //	@Failure		400		{string}    "Bad Request"
 //	@Failure		404		{string}    "Not Found"
 //	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/api/user/{param} [get]
+//	@Router			/api/user/{param} [get].
 func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -297,7 +301,11 @@ func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 
 		log.Printf("User info retreived for: %s", user.Email)
 
-		json.NewEncoder(w).Encode(user)
+		if err := json.NewEncoder(w).Encode(user); err != nil {
+			log.Printf("Failed to encode user response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -319,7 +327,7 @@ func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 //	@Failure		400		{string}    "Bad Request"
 //	@Failure		404		{string}    "Not Found"
 //	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/api/user-auth-token [get]
+//	@Router			/api/user-auth-token [get].
 func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -331,7 +339,11 @@ func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(userID)
+		if err := json.NewEncoder(w).Encode(userID); err != nil {
+			log.Printf("Failed to encode user ID response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -347,20 +359,24 @@ func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
 //	@Success		200		{object}	[]string
 //	@Failure		404		{string}    "Not Found"
 //	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/status [get]
+//	@Router			/status [get].
 func (s *Server) handleStatus() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+			log.Printf("Failed to encode status response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
-// ServeHTTP implements the http.Handler interface
+// ServeHTTP implements the http.Handler interface.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// handleCreateAuthToken creates auth token (aka API key) for the authenticated user.
+// handleCreateAuthToken creates auth token (aka API key) for the authenticated user
 // @Summary Creates auth token (aka API key) for the authenticated user
 // @Description Creates auth token (aka API key) for the authenticated user.
 // @Tags auth-token
@@ -369,7 +385,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to create API key"
-// @Router /api/auth-token [post]
+// @Router /api/auth-token [post].
 func (s *Server) handleCreateAuthToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -406,19 +422,23 @@ func (s *Server) handleCreateAuthToken() http.HandlerFunc {
 		responseToken.Token = decryptedToken
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(responseToken)
+		if err := json.NewEncoder(w).Encode(responseToken); err != nil {
+			log.Printf("Failed to encode token response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
-// handleGetAuthTokens retrieves all auth tokens for the authenticated user.
+// handleGetAuthTokens retrieves all auth tokens for the authenticated user
 // @Summary Get all auth tokens
-// @Description Retrieves all auth tokens for the authenticated user.
+// @Description Retrieves all auth tokens for the authenticated user
 // @Tags auth-tokens
 // @Produce json
 // @Success 200 {array} token.Token "Successfully retrieved auth tokens"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to retrieve auth tokens"
-// @Router /api/auth-tokens [get]
+// @Router /api/auth-tokens [get].
 func (s *Server) handleGetAuthTokens() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -457,7 +477,11 @@ func (s *Server) handleGetAuthTokens() http.HandlerFunc {
 			unencryptedTokens = append(unencryptedTokens, &newToken)
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(unencryptedTokens)
+		if err := json.NewEncoder(w).Encode(unencryptedTokens); err != nil {
+			log.Printf("Failed to encode tokens response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -470,7 +494,7 @@ func (s *Server) handleGetAuthTokens() http.HandlerFunc {
 // @Success 200 {object} map[string]string "Auth token deleted successfully"
 // @Failure 400 {string} string "Invalid token ID format or Token ID is required"
 // @Failure 500 {string} string "Failed to delete auth token"
-// @Router /api/auth-token/{id} [delete]
+// @Router /api/auth-token/{id} [delete].
 func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -510,7 +534,11 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 
 		// Return success response
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"message": "Auth token deleted successfully"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"message": "Auth token deleted successfully"}); err != nil {
+			log.Printf("Failed to encode delete response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -525,7 +553,7 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to create agent"
-// @Router /api/agent-infos [post]
+// @Router /api/agent-infos [post].
 func (s *Server) handleAgentInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -563,7 +591,11 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode agent info response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -577,7 +609,7 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to retrieve agents info"
-// @Router /api/agents [get]
+// @Router /api/agents [get].
 func (s *Server) handleAgentInfos() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -600,7 +632,11 @@ func (s *Server) handleAgentInfos() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(agents)
+		if err := json.NewEncoder(w).Encode(agents); err != nil {
+			log.Printf("Failed to encode agents response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -615,7 +651,7 @@ func (s *Server) handleAgentInfos() http.HandlerFunc {
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 404 {string} string "Agent info not found"
 // @Failure 500 {string} string "Failed to retrieve agent info"
-// @Router /api/agent-info/{id} [get]
+// @Router /api/agent-info/{id} [get].
 func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -651,7 +687,11 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(agentInfo)
+		if err := json.NewEncoder(w).Encode(agentInfo); err != nil {
+			log.Printf("Failed to encode agent info response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -664,7 +704,7 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 // @Param agentID body string true "Agent ID"
 // @Success 201 {object} chat.Chat "Chat session started successfully"
 // @Failure 500 {string} string "Failed to start chat session"
-// @Router /api/chat [post]
+// @Router /api/chat [post].
 func (s *Server) handleStartChat() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -711,7 +751,11 @@ func (s *Server) handleStartChat() http.HandlerFunc {
 			"id": insertResult.InsertedID.(bson.ObjectID).Hex(),
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode chat response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -727,7 +771,7 @@ func (s *Server) handleStartChat() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 404 {string} string "Chat session not found"
 // @Failure 500 {string} string "Failed to add prompt-response pair"
-// @Router /api/chat/{id} [put]
+// @Router /api/chat/{id} [put].
 func (s *Server) handleAddPromptResponse() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -767,7 +811,11 @@ func (s *Server) handleAddPromptResponse() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(chat)
+		if err := json.NewEncoder(w).Encode(chat); err != nil {
+			log.Printf("Failed to encode chat response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -781,7 +829,7 @@ func (s *Server) handleAddPromptResponse() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid chat ID format"
 // @Failure 404 {string} string "Chat session not found"
 // @Failure 500 {string} string "Failed to retrieve chat session"
-// @Router /api/chat/{id} [get]
+// @Router /api/chat/{id} [get].
 func (s *Server) handleGetChatByID() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -816,7 +864,11 @@ func (s *Server) handleGetChatByID() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(chat)
+		if err := json.NewEncoder(w).Encode(chat); err != nil {
+			log.Printf("Failed to encode chat response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -831,7 +883,7 @@ func (s *Server) handleGetChatByID() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid request format"
 // @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Internal server error"
-// @Router /api/diagnostic [post]
+// @Router /api/diagnostic [post].
 func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -840,7 +892,11 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 		userID, _ := GetUserFromContext(r)
 		if userID == "" {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "User not authenticated"})
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": "User not authenticated"}); err != nil {
+				log.Printf("Failed to encode error response: %v", err)
+				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+				return
+			}
 			return
 		}
 
@@ -851,13 +907,21 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 
 		if err := parseRequestJSON(r, &req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+				log.Printf("Failed to encode error response: %v", err)
+				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+				return
+			}
 			return
 		}
 
 		if req.AgentID == "" || req.Issue == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Agent ID and Issue are required"})
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": "Agent ID and Issue are required"}); err != nil {
+				log.Printf("Failed to encode error response: %v", err)
+				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+				return
+			}
 			return
 		}
 
@@ -872,12 +936,20 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 				statusCode = http.StatusForbidden
 			}
 			w.WriteHeader(statusCode)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+				log.Printf("Failed to encode error response: %v", err)
+				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+				return
+			}
 			return
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(session)
+		if err := json.NewEncoder(w).Encode(session); err != nil {
+			log.Printf("Failed to encode session response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -893,7 +965,7 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid request"
 // @Failure 404 {string} string "Session not found"
 // @Failure 500 {string} string "Internal server error"
-// @Router /api/diagnostic/{id}/continue [post]
+// @Router /api/diagnostic/{id}/continue [post].
 func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -937,7 +1009,11 @@ func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(session)
+		if err := json.NewEncoder(w).Encode(session); err != nil {
+			log.Printf("Failed to encode session response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -951,7 +1027,7 @@ func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid session ID format"
 // @Failure 404 {string} string "Session not found"
 // @Failure 500 {string} string "Internal server error"
-// @Router /api/diagnostic/{id} [get]
+// @Router /api/diagnostic/{id} [get].
 func (s *Server) handleGetDiagnostic() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sessionID := r.PathValue("id")
@@ -977,7 +1053,11 @@ func (s *Server) handleGetDiagnostic() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(session)
+		if err := json.NewEncoder(w).Encode(session); err != nil {
+			log.Printf("Failed to encode session response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -991,7 +1071,7 @@ func (s *Server) handleGetDiagnostic() http.HandlerFunc {
 // @Failure 404 {string} string "Session not found"
 // @Failure 400 {string} string "Invalid session ID format"
 // @Failure 500 {string} string "Internal server error"
-// @Router /api/diagnostic/{id}/summary [get]
+// @Router /api/diagnostic/{id}/summary [get].
 func (s *Server) handleGetDiagnosticSummary() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sessionID := r.PathValue("id")
@@ -1016,8 +1096,12 @@ func (s *Server) handleGetDiagnosticSummary() http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte(summary))
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"summary": summary}); err != nil {
+			log.Printf("Failed to encode summary response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -1033,7 +1117,7 @@ func (s *Server) handleGetDiagnosticSummary() http.HandlerFunc {
 // @Failure 403 {string} string "User not authorized"
 // @Failure 404 {string} string "Session not found"
 // @Failure 500 {string} string "Internal server error"
-// @Router /api/diagnostic/{id} [delete]
+// @Router /api/diagnostic/{id} [delete].
 func (s *Server) handleDeleteDiagnostic() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if user is authenticated
@@ -1068,7 +1152,11 @@ func (s *Server) handleDeleteDiagnostic() http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"message": "Session deleted successfully"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"message": "Session deleted successfully"}); err != nil {
+			log.Printf("Failed to encode delete response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -1080,7 +1168,7 @@ func (s *Server) handleDeleteDiagnostic() http.HandlerFunc {
 // @Success 200 {array} diagnostic.DiagnosticSession
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Internal server error"
-// @Router /api/diagnostics [get]
+// @Router /api/diagnostics [get].
 func (s *Server) handleListDiagnostics() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1098,6 +1186,10 @@ func (s *Server) handleListDiagnostics() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(sessions)
+		if err := json.NewEncoder(w).Encode(sessions); err != nil {
+			log.Printf("Failed to encode sessions response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }

@@ -28,7 +28,7 @@ func NewRefreshTokenRepository(db *mongo.Database) *RefreshTokenRepository {
 	}
 }
 
-// static tokens
+// static tokens.
 func (r *TokenRepository) CreateToken(ctx context.Context, token Token) (*Token, error) {
 	tokenResult, err := r.collection.InsertOne(ctx, token)
 	if err != nil {
@@ -110,7 +110,7 @@ func (r *TokenRepository) UpdateToken(ctx context.Context, token *Token) error {
 	return err
 }
 
-// refresh tokens
+// refresh tokens.
 func (r *RefreshTokenRepository) CreateRefreshToken(ctx context.Context, token RefreshToken) (*RefreshToken, error) {
 	tokenResult, err := r.collection.InsertOne(ctx, token)
 	if err != nil {

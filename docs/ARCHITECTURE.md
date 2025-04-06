@@ -4,6 +4,16 @@
 
 NannyAPI is a service that handles prompts from nanny agents, processes them, and interacts with various AI APIs to provide responses. The system is designed with a clean, modular architecture following Go best practices.
 
+## Platform Support
+
+Currently, the diagnostic capabilities are optimized for Linux systems. The roadmap for cross-platform support includes:
+
+- **FreeBSD**: Support for FreeBSD-specific commands, metrics, and log locations
+- **Darwin**: Support for macOS system diagnostics and performance metrics
+- **Windows**: Support for Windows Event Logs, Performance Counters, and WMI queries
+
+Each platform will have its own diagnostic command set and system-specific checks while maintaining a consistent API interface.
+
 ## Architecture Diagram
 
 ```mermaid
@@ -49,6 +59,43 @@ graph TD
 - Manages agent information
 - Handles agent registration and updates
 - Tracks agent statistics
+
+## Logging and Audit
+
+The system implements comprehensive logging for audit purposes:
+
+```mermaid
+graph TD
+    A[API Request] -->|Authentication| B[Auth Logger]
+    A -->|Chat| C[Chat Logger]
+    A -->|Diagnostics| D[Diagnostic Logger]
+    B --> E[Structured JSON Logs]
+    C --> E
+    D --> E
+    E -->|Archive| F[Log Storage]
+    E -->|Analysis| G[Audit Reports]
+```
+
+### Logged Information:
+1. **Authentication Events**
+   - Login attempts
+   - Token creation/deletion
+   - Session management
+
+2. **Chat Interactions**
+   - Complete conversation history
+   - Timestamps and metadata
+   - AI service interactions
+
+3. **Diagnostic Sessions**
+   - Command execution logs
+   - System metric changes
+   - Root cause analysis steps
+
+4. **System Changes**
+   - Resource utilization changes
+   - Configuration modifications
+   - Service state changes
 
 ## Data Flow
 

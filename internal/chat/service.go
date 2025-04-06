@@ -9,9 +9,10 @@ import (
 	"math"
 	"strings"
 
-	"github.com/harshavmb/nannyapi/internal/agent"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/harshavmb/nannyapi/internal/agent"
 )
 
 type ChatService struct {
@@ -89,7 +90,7 @@ func (s *ChatService) processPromptResponse(promptResponse *PromptResponse) erro
 }
 
 // will be removed
-// just faking an API response
+// just faking an API response.
 func randomString(length int) string {
 	buff := make([]byte, int(math.Ceil(float64(length)/2)))
 	rand.Read(buff)
