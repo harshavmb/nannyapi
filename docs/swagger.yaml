@@ -328,7 +328,7 @@ paths:
       - auth-tokens
   /api/auth-tokens:
     get:
-      description: Retrieves all auth tokens for the authenticated user.
+      description: Retrieves all auth tokens for the authenticated user
       produces:
       - application/json
       responses:

@@ -262,7 +262,7 @@ const docTemplate = `{
         },
         "/api/auth-tokens": {
             "get": {
-                "description": "Retrieves all auth tokens for the authenticated user.",
+                "description": "Retrieves all auth tokens for the authenticated user",
                 "produces": [
                     "application/json"
                 ],
@@ -1172,7 +1172,7 @@ const docTemplate = `{
     }
 }`
 
-// SwaggerInfo holds exported Swagger Info so clients can modify it.
+// SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "",
 	Host:             "",
