@@ -43,7 +43,7 @@ func (r *DiagnosticRepository) GetSession(ctx context.Context, sessionID bson.Ob
 	err := r.collection.FindOne(ctx, bson.M{"_id": sessionID}).Decode(&session)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("session not found: %s", sessionID.Hex())
+			return nil, mongo.ErrNoDocuments
 		}
 		return nil, fmt.Errorf("failed to get diagnostic session: %v", err)
 	}

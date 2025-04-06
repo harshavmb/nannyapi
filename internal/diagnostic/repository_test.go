@@ -84,5 +84,5 @@ func TestDiagnosticRepository(t *testing.T) {
 	// Test non-existent session
 	_, err = repo.GetSession(context.Background(), bson.NewObjectID())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "session not found")
+	assert.Equal(t, err.Error(), mongo.ErrNoDocuments.Error())
 }

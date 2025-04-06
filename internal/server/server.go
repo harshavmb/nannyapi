@@ -971,7 +971,7 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 // @Accept json
 // @Produce json
 // @Param id path string true "Session ID"
-// @Param results body []string true "Command results"
+// @Param diagnostic_output body []string true "Command results"
 // @Success 200 {object} diagnostic.DiagnosticSession
 // @Failure 400 {string} string "Invalid request"
 // @Failure 404 {string} string "Session not found"
@@ -989,12 +989,13 @@ func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 
 		// Validate session ID format
 		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
-			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			http.Error(w, "invalid session ID format", http.StatusBadRequest)
 			return
 		}
 
 		var req struct {
-			Results []string `json:"results"`
+			DiagnosticOutput []string             `json:"diagnostic_output"`
+			SystemMetrics    *agent.SystemMetrics `json:"system_metrics,omitempty"`
 		}
 
 		if err := parseRequestJSON(r, &req); err != nil {
@@ -1002,7 +1003,7 @@ func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 			return
 		}
 
-		session, err := s.diagnosticService.ContinueDiagnosticSession(r.Context(), sessionID, req.Results)
+		session, err := s.diagnosticService.ContinueDiagnosticSession(r.Context(), sessionID, req.DiagnosticOutput)
 		if err != nil {
 			statusCode := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "invalid session ID format") {
@@ -1011,6 +1012,11 @@ func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 				statusCode = http.StatusNotFound
 			}
 			http.Error(w, err.Error(), statusCode)
+			return
+		}
+
+		if session == nil {
+			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
 
@@ -1039,14 +1045,14 @@ func (s *Server) handleGetDiagnostic() http.HandlerFunc {
 
 		// Validate session ID format
 		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
-			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			http.Error(w, "invalid session ID format", http.StatusBadRequest)
 			return
 		}
 
 		session, err := s.diagnosticService.GetDiagnosticSession(r.Context(), sessionID)
 		if err != nil {
 			statusCode := http.StatusInternalServerError
-			if err.Error() == "session not found: "+sessionID {
+			if strings.Contains(err.Error(), "session not found") {
 				statusCode = http.StatusNotFound
 			}
 			http.Error(w, err.Error(), statusCode)
@@ -1079,14 +1085,14 @@ func (s *Server) handleGetDiagnosticSummary() http.HandlerFunc {
 
 		// Validate session ID format
 		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
-			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			http.Error(w, "invalid session ID format", http.StatusBadRequest)
 			return
 		}
 
 		summary, err := s.diagnosticService.GetDiagnosticSummary(r.Context(), sessionID)
 		if err != nil {
 			statusCode := http.StatusInternalServerError
-			if err.Error() == "session not found: "+sessionID {
+			if strings.Contains(err.Error(), "session not found") {
 				statusCode = http.StatusNotFound
 			}
 			http.Error(w, err.Error(), statusCode)
@@ -1135,7 +1141,7 @@ func (s *Server) handleDeleteDiagnostic() http.HandlerFunc {
 		err := s.diagnosticService.DeleteSession(r.Context(), sessionID, userID)
 		if err != nil {
 			statusCode := http.StatusInternalServerError
-			if err.Error() == "session not found: "+sessionID {
+			if err.Error() == "session not found" {
 				statusCode = http.StatusNotFound
 			} else if err.Error() == "user does not own this session" {
 				statusCode = http.StatusForbidden

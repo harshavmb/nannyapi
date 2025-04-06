@@ -186,6 +186,9 @@ func (s *DiagnosticService) DeleteSession(ctx context.Context, sessionID string,
 	// First get the session to verify ownership
 	session, err := s.repository.GetSession(ctx, id)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return fmt.Errorf("session not found")
+		}
 		return err
 	}
 

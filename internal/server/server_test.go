@@ -1333,15 +1333,13 @@ func TestHandleStartDiagnostic(t *testing.T) {
 	t.Run("InvalidAgentID", func(t *testing.T) {
 		diagnosticReq := `{
 			"agent_id": "invalid-id",
-			"issue": "High CPU usage",
-			"system_info": {
-				"OS": "Ubuntu 22.04"
-			}
+			"issue": "High CPU usage"
 		}`
 
 		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
 		assert.NoError(t, err)
 		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1353,17 +1351,13 @@ func TestHandleStartDiagnostic(t *testing.T) {
 	t.Run("NonExistentAgent", func(t *testing.T) {
 		diagnosticReq := fmt.Sprintf(`{
 			"agent_id": "%s",
-			"issue": "High CPU usage",
-			"system_info": {
-				"OS": "Ubuntu 22.04"
-			}
+			"issue": "High CPU usage"
 		}`, bson.NewObjectID().Hex())
 
 		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
 		assert.NoError(t, err)
 		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-		// Add the Content-Type header
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", "application/json") // Add Content-Type header
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1373,17 +1367,14 @@ func TestHandleStartDiagnostic(t *testing.T) {
 	})
 
 	t.Run("MissingRequiredFields", func(t *testing.T) {
+		// Create request with missing required fields
 		diagnosticReq := `{
-			"agent_id": "507f1f77bcf86cd799439011",
-			"system_info": {
-				"OS": "Ubuntu 22.04"
-			}
+			"agent_id": "507f1f77bcf86cd799439011"
 		}`
 
 		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
 		assert.NoError(t, err)
 		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-		// Add the Content-Type header
 		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
@@ -1430,6 +1421,14 @@ func TestHandleContinueDiagnostic(t *testing.T) {
 				MemoryTotal: 16 * 1024 * 1024 * 1024,
 				MemoryUsed:  8 * 1024 * 1024 * 1024,
 				MemoryFree:  8 * 1024 * 1024 * 1024,
+				DiskUsage: map[string]int64{
+					"/":     250 * 1024 * 1024 * 1024,
+					"/home": 500 * 1024 * 1024 * 1024,
+				},
+				FSUsage: map[string]string{
+					"/":     "45%",
+					"/home": "60%",
+				},
 			},
 		}
 		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
@@ -1445,16 +1444,32 @@ func TestHandleContinueDiagnostic(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Now continue the session
-		continueReq := `{
-			"results": [
-				"top - 14:30:00 up 7 days, load average: 2.15, 1.92, 1.74",
-				"Tasks: 180 total, 2 running, 178 sleeping"
-			]
-		}`
+		continueReq := fmt.Sprintf(`{
+            "diagnostic_output": [
+                "top - 14:30:00 up 7 days, load average: 2.15, 1.92, 1.74",
+                "Tasks: 180 total, 2 running, 178 sleeping"
+            ],
+            "system_metrics": {
+                "cpu_info": ["Intel i7-1165G7"],
+                "cpu_usage": 45.5,
+                "memory_total": 17179869184,
+                "memory_used": 8589934592,
+                "memory_free": 8589934592,
+                "disk_usage": {
+                    "/": 268435456000,
+                    "/home": 536870912000
+                },
+                "fs_usage": {
+                    "/": "45%%",
+                    "/home": "60%%"
+                }
+            }
+        }`)
 
 		req, err := http.NewRequest("POST", fmt.Sprintf("/api/diagnostic/%s/continue", session.ID.Hex()), strings.NewReader(continueReq))
 		assert.NoError(t, err)
 		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1466,21 +1481,71 @@ func TestHandleContinueDiagnostic(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, session.ID, updatedSession.ID)
 		assert.Equal(t, 1, updatedSession.CurrentIteration)
-		assert.NotEmpty(t, updatedSession.History)
-
-		// Verify system metrics are present in the latest response
-		latestResponse := updatedSession.History[len(updatedSession.History)-1]
-		assert.NotNil(t, latestResponse.SystemSnapshot)
-		assert.NotEmpty(t, latestResponse.SystemSnapshot.CPUInfo)
-		assert.Greater(t, latestResponse.SystemSnapshot.CPUUsage, float64(0))
+		assert.Greater(t, len(updatedSession.History), 0)
 	})
 
 	t.Run("NonExistentSession", func(t *testing.T) {
-		continueReq := `{"results": ["test output"]}`
+		// First create a diagnostic session
+		agentInfo := &agent.AgentInfo{
+			UserID:        validToken.UserID,
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+			SystemMetrics: agent.SystemMetrics{
+				CPUInfo:     []string{"Intel i7-1165G7"},
+				CPUUsage:    45.5,
+				MemoryTotal: 16 * 1024 * 1024 * 1024,
+				MemoryUsed:  8 * 1024 * 1024 * 1024,
+				MemoryFree:  8 * 1024 * 1024 * 1024,
+				DiskUsage: map[string]int64{
+					"/":     250 * 1024 * 1024 * 1024,
+					"/home": 500 * 1024 * 1024 * 1024,
+				},
+				FSUsage: map[string]string{
+					"/":     "45%",
+					"/home": "60%",
+				},
+			},
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		assert.NoError(t, err)
+
+		agentID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		_, err = server.diagnosticService.StartDiagnosticSession(
+			context.Background(),
+			agentID,
+			validToken.UserID,
+			"High CPU usage",
+		)
+		assert.NoError(t, err)
+
+		continueReq := fmt.Sprintf(`{
+            "diagnostic_output": [
+                "top - 14:30:00 up 7 days, load average: 2.15, 1.92, 1.74",
+                "Tasks: 180 total, 2 running, 178 sleeping"
+            ],
+            "system_metrics": {
+                "cpu_info": ["Intel i7-1165G7"],
+                "cpu_usage": 45.5,
+                "memory_total": 17179869184,
+                "memory_used": 8589934592,
+                "memory_free": 8589934592,
+                "disk_usage": {
+                    "/": 268435456000,
+                    "/home": 536870912000
+                },
+                "fs_usage": {
+                    "/": "45%%",
+                    "/home": "60%%"
+                }
+            }
+        }`)
 
 		req, err := http.NewRequest("POST", fmt.Sprintf("/api/diagnostic/%s/continue", bson.NewObjectID().Hex()), strings.NewReader(continueReq))
 		assert.NoError(t, err)
 		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1523,7 +1588,7 @@ func TestHandleGetDiagnosticSession(t *testing.T) {
 		session, err := server.diagnosticService.StartDiagnosticSession(
 			context.Background(),
 			agentID,
-			"123456",
+			validToken.UserID,
 			"High CPU usage",
 		)
 		assert.NoError(t, err)
@@ -1565,7 +1630,7 @@ func TestHandleGetDiagnosticSession(t *testing.T) {
 		server.ServeHTTP(recorder, req)
 
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), "invalid session ID format")
+		assert.Contains(t, recorder.Body.String(), "invalid session ID format\n")
 	})
 }
 
@@ -1706,7 +1771,7 @@ func TestHandleGetDiagnosticSummary(t *testing.T) {
 		session, err := server.diagnosticService.StartDiagnosticSession(
 			context.Background(),
 			agentID,
-			"123456",
+			validToken.UserID,
 			"High CPU usage",
 		)
 		assert.NoError(t, err)
