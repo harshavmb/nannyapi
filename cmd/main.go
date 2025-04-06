@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/rs/cors"
 
@@ -115,8 +116,19 @@ func main() {
 	})
 	handler := c.Handler(srv)
 
+	// Create a server with timeouts
+	httpServer := &http.Server{
+		Addr:    ":" + port,
+		Handler: handler,
+		// G114 (CWE-676): Use of net/http serve function that has no support for setting timeouts (Confidence: HIGH, Severity: MEDIUM).
+		ReadTimeout:       5 * time.Second,   // Maximum duration for reading the entire request, including the body.
+		WriteTimeout:      10 * time.Second,  // Maximum duration for writing the response.
+		IdleTimeout:       120 * time.Second, // Maximum amount of time to wait for the next request when keep-alives are enabled.
+		ReadHeaderTimeout: 3 * time.Second,
+	}
+
 	log.Printf("Starting server on port %s...", port)
-	if err := http.ListenAndServe(":"+port, handler); err != nil {
+	if err := httpServer.ListenAndServe(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

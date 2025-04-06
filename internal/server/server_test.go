@@ -1780,7 +1780,7 @@ func TestHandleGetDiagnosticSummary(t *testing.T) {
 		server.ServeHTTP(recorder, req)
 
 		assert.Equal(t, http.StatusOK, recorder.Code)
-		
+
 		var response map[string]string
 		err = json.NewDecoder(recorder.Body).Decode(&response)
 		assert.NoError(t, err)

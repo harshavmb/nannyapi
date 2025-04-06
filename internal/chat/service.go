@@ -93,7 +93,13 @@ func (s *ChatService) processPromptResponse(promptResponse *PromptResponse) erro
 // just faking an API response.
 func randomString(length int) string {
 	buff := make([]byte, int(math.Ceil(float64(length)/2)))
-	rand.Read(buff)
+	if _, err := rand.Read(buff); err != nil {
+		// G104 (CWE-703): Errors unhandled (Confidence: HIGH, Severity: LOW)
+		// If we can't generate random bytes, log the error and return an empty string
+		// This is a critical error that should be extremely rare
+		log.Printf("Failed to generate random string: %v", err)
+		return ""
+	}
 	str := hex.EncodeToString(buff)
 	return str[:length] // strip 1 extra character we get from odd length results
 }

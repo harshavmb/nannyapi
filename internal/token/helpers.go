@@ -25,12 +25,18 @@ const (
 // from https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go
 func GenerateRandomString(length int) string {
 	buff := make([]byte, int(math.Ceil(float64(length)/float64(1.33333333333))))
-	rand.Read(buff)
+	if _, err := rand.Read(buff); err != nil {
+		// G104 (CWE-703): Errors unhandled (Confidence: HIGH, Severity: LOW)
+		// If we can't generate random bytes, log the error and return an empty string
+		// This is a critical error that should be extremely rare
+		log.Printf("Failed to generate random string: %v", err)
+		return ""
+	}
 	str := base64.RawURLEncoding.EncodeToString(buff)
 	return str[:length] // strip 1 extra character we get from odd length results
 }
 
-// hashToken hashes the token using SHA-256.
+// HashToken hashes the token using SHA-256.
 func HashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return base64.StdEncoding.EncodeToString(hash[:])
