@@ -319,52 +319,6 @@ func TestDeleteSession(t *testing.T) {
 	assert.Contains(t, err.Error(), "session not found")
 }
 
-// analyzeNegativeResponse checks if the response matches expected unsupported case patterns.
-func analyzeNegativeResponse(response string, caseType string) bool {
-	response = strings.ToLower(response)
-	switch caseType {
-	case "ambiguous":
-		terms := []string{
-			"insufficient", "more details", "specific", "symptoms",
-			"error messages", "logs", "clarify", "provide more information",
-		}
-		matchCount := 0
-		for _, term := range terms {
-			if strings.Contains(response, term) {
-				matchCount++
-			}
-		}
-		return matchCount >= 3 // At least 3 terms should be present
-
-	case "hardware":
-		terms := []string{
-			"physical", "inspection", "hardware", "manual check",
-			"cannot diagnose", "requires inspection", "technician",
-		}
-		matchCount := 0
-		for _, term := range terms {
-			if strings.Contains(response, term) {
-				matchCount++
-			}
-		}
-		return matchCount >= 2 // At least 2 terms should be present
-
-	case "non_linux":
-		terms := []string{
-			"windows", "non-linux", "outside scope", "linux tools",
-			"cannot diagnose", "not supported", "different os",
-		}
-		matchCount := 0
-		for _, term := range terms {
-			if strings.Contains(response, term) {
-				matchCount++
-			}
-		}
-		return matchCount >= 2 // At least 2 terms should be present
-	}
-	return false
-}
-
 // getTermVariations returns common variations of diagnostic terms.
 func getTermVariations(term string) []string {
 	variations := []string{term}

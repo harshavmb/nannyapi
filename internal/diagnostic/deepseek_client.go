@@ -234,19 +234,6 @@ func extractPID(results []string) string {
 	return "N/A"
 }
 
-// detectProcessType tries to determine the type of process (java, python, etc).
-func detectProcessType(results []string) string {
-	processInfo := strings.ToLower(strings.Join(results, " "))
-	switch {
-	case strings.Contains(processInfo, "java"):
-		return "java"
-	case strings.Contains(processInfo, "python"):
-		return "python"
-	default:
-		return "unknown"
-	}
-}
-
 // DiagnoseIssue sends a diagnostic request to DeepSeek API.
 func (c *DeepSeekClient) DiagnoseIssue(req *DiagnosticRequest) (*DiagnosticResponse, error) {
 	messages := []openai.ChatCompletionMessage{

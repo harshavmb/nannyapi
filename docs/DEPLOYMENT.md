@@ -35,7 +35,7 @@ docker-compose up -d
 ## Kubernetes Deployment
 
 ### Prerequisites
-- Kubernetes cluster 1.22+
+- Kubernetes cluster 1.24+
 - kubectl configured
 - Helm 3.0+
 

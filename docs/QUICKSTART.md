@@ -4,7 +4,7 @@ This guide will help you get started with NannyAPI development quickly.
 
 ## Prerequisites
 
-- Go 1.22 or higher
+- Go 1.24 or higher
 - Docker and Docker Compose
 - Git
 - Make

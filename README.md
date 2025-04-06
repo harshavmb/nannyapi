@@ -25,7 +25,7 @@ go run ./cmd/main.go
 
 ### Prerequisites
 
-*   Go 1.22 or higher
+*   Go 1.24 or higher
 *   MongoDB
 
 ### Installation

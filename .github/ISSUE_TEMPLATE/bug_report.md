@@ -21,7 +21,7 @@ A clear and concise description of what you expected to happen.
 
 **Environment**
 - NannyAPI version: [e.g. 1.0.0]
-- Go version: [e.g. 1.22]
+- Go version: [e.g. 1.24]
 - OS: [e.g. Ubuntu 22.04]
 - Deployment method: [e.g. Docker, binary]
 
