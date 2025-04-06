@@ -944,7 +944,15 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 
 		session, err := s.diagnosticService.StartDiagnosticSession(r.Context(), req.AgentID, userID, req.Issue, req.SystemInfo)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to start diagnostic session: %v", err), http.StatusInternalServerError)
+			statusCode := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "invalid agent ID format") {
+				statusCode = http.StatusBadRequest
+			} else if strings.Contains(err.Error(), "agent not found") {
+				statusCode = http.StatusBadRequest
+			} else if strings.Contains(err.Error(), "agent does not belong to user") {
+				statusCode = http.StatusForbidden
+			}
+			http.Error(w, err.Error(), statusCode)
 			return
 		}
 
@@ -968,29 +976,41 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 // @Router /api/diagnostic/{id}/continue [post]
 func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
 		sessionID := r.PathValue("id")
 		if sessionID == "" {
 			http.Error(w, "Session ID is required", http.StatusBadRequest)
 			return
 		}
 
-		var results []string
-		if err := parseRequestJSON(r, &results); err != nil {
+		// Validate session ID format
+		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			return
+		}
+
+		var req struct {
+			Results []string `json:"results"`
+		}
+
+		if err := parseRequestJSON(r, &req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		session, err := s.diagnosticService.ContinueDiagnosticSession(r.Context(), sessionID, results)
+		session, err := s.diagnosticService.ContinueDiagnosticSession(r.Context(), sessionID, req.Results)
 		if err != nil {
 			statusCode := http.StatusInternalServerError
-			if err.Error() == "session not found: "+sessionID {
+			if strings.Contains(err.Error(), "invalid session ID format") {
+				statusCode = http.StatusBadRequest
+			} else if strings.Contains(err.Error(), "session not found") {
 				statusCode = http.StatusNotFound
 			}
 			http.Error(w, err.Error(), statusCode)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(session)
 	}
 }
@@ -1002,6 +1022,7 @@ func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 // @Produce json
 // @Param id path string true "Session ID"
 // @Success 200 {object} diagnostic.DiagnosticSession
+// @Failure 400 {string} string "Invalid session ID format"
 // @Failure 404 {string} string "Session not found"
 // @Failure 500 {string} string "Internal server error"
 // @Router /api/diagnostic/{id} [get]
@@ -1010,6 +1031,12 @@ func (s *Server) handleGetDiagnostic() http.HandlerFunc {
 		sessionID := r.PathValue("id")
 		if sessionID == "" {
 			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate session ID format
+		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
 			return
 		}
 
@@ -1036,6 +1063,7 @@ func (s *Server) handleGetDiagnostic() http.HandlerFunc {
 // @Param id path string true "Session ID"
 // @Success 200 {string} string "Diagnostic summary"
 // @Failure 404 {string} string "Session not found"
+// @Failure 400 {string} string "Invalid session ID format"
 // @Failure 500 {string} string "Internal server error"
 // @Router /api/diagnostic/{id}/summary [get]
 func (s *Server) handleGetDiagnosticSummary() http.HandlerFunc {
@@ -1043,6 +1071,12 @@ func (s *Server) handleGetDiagnosticSummary() http.HandlerFunc {
 		sessionID := r.PathValue("id")
 		if sessionID == "" {
 			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate session ID format
+		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
 			return
 		}
 
@@ -1086,6 +1120,12 @@ func (s *Server) handleDeleteDiagnostic() http.HandlerFunc {
 		sessionID := r.PathValue("id")
 		if sessionID == "" {
 			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate session ID format
+		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
 			return
 		}
 

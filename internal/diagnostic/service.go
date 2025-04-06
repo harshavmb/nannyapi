@@ -7,6 +7,7 @@ import (
 
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // DiagnosticService manages diagnostic sessions and coordinates with DeepSeek API
@@ -32,15 +33,19 @@ func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, agentID 
 	// Validate agent exists
 	agentObjectID, err := bson.ObjectIDFromHex(agentID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid agent ID format: %v", err)
+		return nil, fmt.Errorf("invalid agent ID format")
 	}
 
 	agentInfo, err := s.agentService.GetAgentInfoByID(ctx, agentObjectID)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, fmt.Errorf("agent not found")
+		}
 		return nil, fmt.Errorf("failed to validate agent: %v", err)
 	}
+
 	if agentInfo == nil {
-		return nil, fmt.Errorf("agent not found: %s", agentID)
+		return nil, fmt.Errorf("agent not found")
 	}
 
 	// Validate agent belongs to user
@@ -75,7 +80,7 @@ func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, agentID 
 
 	resp, err := s.client.DiagnoseIssue(req)
 	if err != nil {
-		return session, fmt.Errorf("failed to start diagnostic session: %v", err)
+		return session, fmt.Errorf("failed to diagnose issue: %v", err)
 	}
 
 	session.History = append(session.History, *resp)
@@ -92,18 +97,21 @@ func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, agentID 
 func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessionID string, results []string) (*DiagnosticSession, error) {
 	id, err := bson.ObjectIDFromHex(sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid session ID format: %v", err)
+		return nil, fmt.Errorf("invalid session ID format")
 	}
 
 	session, err := s.repository.GetSession(ctx, id)
 	if err != nil {
-		return nil, err
+		if err == mongo.ErrNoDocuments {
+			return nil, fmt.Errorf("session not found")
+		}
+		return nil, fmt.Errorf("failed to retrieve session")
 	}
 
 	if session.CurrentIteration >= session.MaxIterations {
 		session.Status = "completed"
 		if err := s.repository.UpdateSession(ctx, session); err != nil {
-			return session, fmt.Errorf("failed to update session status: %v", err)
+			return session, fmt.Errorf("failed to update session in database: %v", err)
 		}
 		return session, nil
 	}
@@ -117,6 +125,7 @@ func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessi
 
 	resp, err := s.client.DiagnoseIssue(req)
 	if err != nil {
+		// On AI service error, still increment iteration but don't add response
 		session.CurrentIteration++
 		session.UpdatedAt = time.Now()
 
@@ -125,11 +134,12 @@ func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessi
 		}
 
 		if err := s.repository.UpdateSession(ctx, session); err != nil {
-			return session, fmt.Errorf("failed to update session: %v", err)
+			return session, fmt.Errorf("failed to update session in database: %v", err)
 		}
-		return session, fmt.Errorf("failed to continue diagnostic session: %v", err)
+		return session, nil
 	}
 
+	// On success, add response to history and update session
 	session.History = append(session.History, *resp)
 	session.CurrentIteration++
 	session.UpdatedAt = time.Now()
@@ -139,7 +149,7 @@ func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessi
 	}
 
 	if err := s.repository.UpdateSession(ctx, session); err != nil {
-		return session, fmt.Errorf("failed to update session: %v", err)
+		return session, fmt.Errorf("failed to update session in database: %v", err)
 	}
 
 	return session, nil
@@ -181,21 +191,32 @@ func (s *DiagnosticService) ListUserSessions(ctx context.Context, userID string)
 func (s *DiagnosticService) GetDiagnosticSession(ctx context.Context, sessionID string) (*DiagnosticSession, error) {
 	id, err := bson.ObjectIDFromHex(sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid session ID format: %v", err)
+		return nil, fmt.Errorf("invalid session ID format %v", err)
 	}
-	return s.repository.GetSession(ctx, id)
+
+	session, err := s.repository.GetSession(ctx, id)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, fmt.Errorf("session not found")
+		}
+		return nil, fmt.Errorf("failed to retrieve session %v", err)
+	}
+	return session, nil
 }
 
 // GetDiagnosticSummary generates a summary of the diagnostic session
 func (s *DiagnosticService) GetDiagnosticSummary(ctx context.Context, sessionID string) (string, error) {
 	id, err := bson.ObjectIDFromHex(sessionID)
 	if err != nil {
-		return "", fmt.Errorf("invalid session ID format: %v", err)
+		return "", fmt.Errorf("invalid session ID format %v", err)
 	}
 
 	session, err := s.repository.GetSession(ctx, id)
 	if err != nil {
-		return "", err
+		if err == mongo.ErrNoDocuments {
+			return "", fmt.Errorf("session not found")
+		}
+		return "", fmt.Errorf("failed to retrieve session %v", err)
 	}
 
 	summary := fmt.Sprintf("Diagnostic Summary for Issue: %s\n\n", session.InitialIssue)
