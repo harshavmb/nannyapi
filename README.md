@@ -1,5 +1,17 @@
 # nannyapi
+
+[![CI](https://github.com/harshavmb/nannyapi/actions/workflows/ci.yml/badge.svg)](https://github.com/harshavmb/nannyapi/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/harshavmb/nannyapi/branch/main/graph/badge.svg)](https://codecov.io/gh/harshavmb/nannyapi)
+[![Go Report Card](https://goreportcard.com/badge/github.com/harshavmb/nannyapi)](https://goreportcard.com/report/github.com/harshavmb/nannyapi)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 This repo is an API endpoint service that receives prompts from nannyagents, does some preprocessing, and interacts with remote/self-hosted AI APIs to help answer prompts issued by nannyagents.
+
+## Documentation
+
+- [API Documentation](https://nannyai.dev/documentation)
+- [Swagger Documentation](https://api.nannyai.dev/swagger)
+- [Architecture Overview](./docs/ARCHITECTURE.md)
 
 ## Project Structure
 
@@ -22,9 +34,9 @@ nannyapi
 │   │   ├── index.html # index page
 │   │   ├── create_auth_token.html # create auth token page
 │   │   ├── auth_tokens.html # auth tokens page
-├── 
+├──
 go.mod # Module definition file
-└── 
+└──
 README.md # Documentation for the project
 ```
 

@@ -885,61 +885,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/chat": {
-            "post": {
-                "description": "Chat with the model",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "chat"
-                ],
-                "summary": "Chat with the model",
-                "parameters": [
-                    {
-                        "description": "Chat request",
-                        "name": "chat",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/server.chatRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
         "/status": {
             "get": {
                 "description": "Status of the API",
@@ -1198,42 +1143,6 @@ const docTemplate = `{
                     "additionalProperties": {
                         "type": "string"
                     }
-                }
-            }
-        },
-        "server.chatRequest": {
-            "type": "object",
-            "properties": {
-                "chat": {
-                    "type": "string"
-                },
-                "history": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/server.content"
-                    }
-                }
-            }
-        },
-        "server.content": {
-            "type": "object",
-            "properties": {
-                "parts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/server.part"
-                    }
-                },
-                "role": {
-                    "type": "string"
-                }
-            }
-        },
-        "server.part": {
-            "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string"
                 }
             }
         },

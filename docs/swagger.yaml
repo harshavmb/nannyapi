@@ -146,29 +146,6 @@ definitions:
           type: string
         type: object
     type: object
-  server.chatRequest:
-    properties:
-      chat:
-        type: string
-      history:
-        items:
-          $ref: '#/definitions/server.content'
-        type: array
-    type: object
-  server.content:
-    properties:
-      parts:
-        items:
-          $ref: '#/definitions/server.part'
-        type: array
-      role:
-        type: string
-    type: object
-  server.part:
-    properties:
-      text:
-        type: string
-    type: object
   token.Token:
     properties:
       created_at:
@@ -763,42 +740,6 @@ paths:
       summary: Fetch user info from id
       tags:
       - user-from-email
-  /chat:
-    post:
-      consumes:
-      - application/json
-      description: Chat with the model
-      parameters:
-      - description: Chat request
-        in: body
-        name: chat
-        required: true
-        schema:
-          $ref: '#/definitions/server.chatRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              type: string
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            type: string
-        "404":
-          description: Not Found
-          schema:
-            type: string
-        "500":
-          description: Internal Server Error
-          schema:
-            type: string
-      summary: Chat with the model
-      tags:
-      - chat
   /status:
     get:
       consumes:

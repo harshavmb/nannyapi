@@ -20,7 +20,6 @@ import (
 	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
-	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -58,9 +57,6 @@ func setupTestDB(t *testing.T) (*mongo.Client, func()) {
 }
 
 func setupServer(t *testing.T) (*Server, func(), token.Token, string) {
-	// Mock Gemini Client
-	mockGeminiClient := &api.GeminiClient{}
-
 	// Mock GitHub Auth
 	mockGitHubAuth := &auth.GitHubAuth{}
 
@@ -85,7 +81,7 @@ func setupServer(t *testing.T) (*Server, func(), token.Token, string) {
 	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepository, agentInfoservice)
 
 	// Create a new server instance
-	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, diagnosticService, jwtSecret, encryptionKey)
+	server := NewServer(mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, diagnosticService, jwtSecret, encryptionKey)
 
 	// Create a valid auth token for the test user
 	testUser := &user.User{

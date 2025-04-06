@@ -10,14 +10,12 @@ import (
 
 	"encoding/json"
 
-	"github.com/google/generative-ai-go/genai"
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
-	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/rs/cors"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -27,7 +25,6 @@ import (
 // Server represents the HTTP server
 type Server struct {
 	mux                 *http.ServeMux
-	geminiClient        *api.GeminiClient
 	githubAuth          *auth.GitHubAuth
 	userService         *user.UserService
 	agentInfoService    *agent.AgentInfoService
@@ -54,16 +51,8 @@ type ContinueDiagnosticRequest struct {
 	Results []string `json:"results"`
 }
 
-// startChat starts a chat session with the model using the given history.
-func (s *Server) startChat(hist []content) *genai.ChatSession {
-	model := s.geminiClient.Model()
-	cs := model.StartChat()
-	cs.History = transform(hist)
-	return cs
-}
-
 // NewServer creates a new Server instance
-func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, diagnosticService *diagnostic.DiagnosticService, jwtSecret, nannyEncryptionKey string) *Server {
+func NewServer(githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, diagnosticService *diagnostic.DiagnosticService, jwtSecret, nannyEncryptionKey string) *Server {
 	mux := http.NewServeMux()
 
 	// override default nanny API port if NANNY_API_PORT is set
@@ -85,7 +74,7 @@ func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, user
 		gitHubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", nannyAPIPort) // Default GitHubCallback URL
 	}
 
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, diagnosticService: diagnosticService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret, nannyEncryptionKey: nannyEncryptionKey}
+	server := &Server{mux: mux, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, diagnosticService: diagnosticService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret, nannyEncryptionKey: nannyEncryptionKey}
 	server.routes()
 	return server
 }
@@ -93,7 +82,6 @@ func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, user
 // routes defines the routes for the server
 func (s *Server) routes() {
 
-	s.mux.HandleFunc("POST /chat", s.chatHandler)
 	s.mux.HandleFunc("/status", s.handleStatus())
 	s.mux.HandleFunc("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL(s.nannySwaggerURL),
@@ -345,77 +333,6 @@ func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
 
 		json.NewEncoder(w).Encode(userID)
 	}
-}
-
-// chatHandler returns the complete response of the model to the client. Expects a JSON payload in
-// the request with the following format:
-// Request:
-//   - chat: string
-//   - history: []
-//
-// Sends a JSON payload containing the model response to the client with the following format.
-// Response:
-//   - text: string
-//
-// chatHandler godoc
-//
-//	@Summary		Chat with the model
-//	@Description	Chat with the model
-//	@Tags			chat
-//	@Accept			json
-//	@Produce		json
-//	@Param			chat	body		chatRequest	true	"Chat request"
-//	@Success		200		{object}	[]string
-//	@Failure		400		{string}    "Bad Request"
-//	@Failure		404		{string}    "Not Found"
-//	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/chat [post]
-func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
-	cr := &chatRequest{}
-	if err := parseRequestJSON(r, cr); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	cs := s.startChat(cr.History)
-
-	if len(cr.History) == 0 {
-		// 1. Initial Prompt (Request from User/Agent):
-		initialPrompt := fmt.Sprintf("Run a list investigative Linux commands to diagnose %s on a server. If binaries are from sysstat, collect metrics for 5 seconds every 1 sec interval (only if required by the input prompt)", cr.Chat)
-		res, err := cs.SendMessage(s.geminiClient.Ctx, genai.Text(initialPrompt))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return // Return early to avoid sending a response
-		}
-
-		// ... (Extract commands from Gemini's response as before) ...
-		commands, err := extractCommands(res) // Helper function to extract commands
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// 2. Send commands to agent (and return to the agent)
-		sendCommandsToAgent(w, commands) // Helper to send commands to agent
-	} else {
-		// 3. Agent's Response (Commands Output):
-		//agentResponse := getAgentResponse(r) // Helper to read JSON from agent
-
-		// 4. Construct a *new* prompt for Gemini *including* the agent's output
-		feedbackPrompt := fmt.Sprintf("Here are the results of the commands I ran: %s", cr.Chat)
-
-		// 5. Send feedback prompt to Gemini
-		feedbackRes, err := cs.SendMessage(s.geminiClient.Ctx, genai.Text(feedbackPrompt))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// 6. Process Gemini's *feedback* response and send it back to the client
-		geminiFeedback := extractGeminiFeedback(feedbackRes) // Helper function
-		sendGeminiFeedbackToClient(w, geminiFeedback)        // Helper to send the feedback
-	}
-
 }
 
 // handleIndex handles the index and status routes

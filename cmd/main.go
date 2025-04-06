@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 	"github.com/harshavmb/nannyapi/internal/server"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
-	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/harshavmb/nannyapi/pkg/database"
 	"github.com/rs/cors"
 )
@@ -37,20 +35,7 @@ func main() {
 	docs.SwaggerInfo.Host = "nannyai.dev"
 	docs.SwaggerInfo.BasePath = "/api/v1"
 
-	ctx := context.Background()
-
-	var geminiClient *api.GeminiClient
 	var err error
-
-	// Check if Gemini API key is present
-	if os.Getenv("GEMINI_API_KEY") != "" {
-		// Initialize Gemini API client
-		geminiClient, err = api.NewGeminiClient(ctx)
-		if err != nil {
-			log.Fatalf("could not create Gemini client %v", err)
-		}
-		defer geminiClient.Close()
-	}
 
 	// Initialize MongoDB client
 	mongoDB, err := database.InitDB()
@@ -107,9 +92,8 @@ func main() {
 	}
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService, refreshTokenService, nannyEncryptionKey, jwtSecret, frontendHost)
 
-	// Create server with Gemini client
+	// Create server with AI, database client
 	srv := server.NewServer(
-		geminiClient,
 		githubAuth,
 		userService,
 		agentService,

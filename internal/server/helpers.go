@@ -105,24 +105,6 @@ func generateHistory(prompts, responses, types []string) []chat.PromptResponse {
 	return history
 }
 
-func extractGeminiFeedback(res *genai.GenerateContentResponse) string {
-	// Extract the Gemini's feedback from the response
-	var geminiFeedback string
-	for _, candidate := range res.Candidates {
-		for _, part := range candidate.Content.Parts {
-			if txt, ok := part.(genai.Text); ok {
-				geminiFeedback += string(txt)
-			}
-		}
-	}
-	return geminiFeedback
-}
-
-func sendGeminiFeedbackToClient(w http.ResponseWriter, feedback string) {
-	// Send Gemini's feedback back to the client (as JSON)
-	json.NewEncoder(w).Encode(map[string]string{"feedback": feedback})
-}
-
 // IsValidEmail checks if a string is a valid email address
 func IsValidEmail(email string) bool {
 	// Updated regular expression to handle IP addresses in square brackets

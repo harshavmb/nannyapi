@@ -1,0 +1,35 @@
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.5.0
+  hooks:
+    - id: trailing-whitespace
+    - id: end-of-file-fixer
+    - id: check-yaml
+    - id: check-json
+    - id: check-added-large-files
+    - id: no-commit-to-branch
+      args: [--branch, main]
+
+- repo: https://github.com/dnephin/pre-commit-golang
+  rev: v0.5.1
+  hooks:
+    - id: go-fmt
+    - id: go-vet
+    - id: go-imports
+    - id: golangci-lint
+    - id: go-unit-tests
+
+- repo: local
+  hooks:
+    - id: swagger-check
+      name: Check Swagger Docs
+      entry: swag init -g cmd/main.go
+      language: system
+      pass_filenames: false
+      types: [go]
+
+    - id: check-commit-message
+      name: Check Commit Message
+      entry: python -c "import sys; msg = open(sys.argv[1]).read(); assert any(msg.startswith(prefix) for prefix in ['feat:', 'fix:', 'docs:', 'style:', 'refactor:', 'test:', 'chore:']), 'Commit message must start with type: feat:, fix:, docs:, style:, refactor:, test:, chore:'"
+      language: system
+      stages: [commit-msg]
