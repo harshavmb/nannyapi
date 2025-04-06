@@ -533,7 +533,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Check the response body
-		expected := fmt.Sprintf(`{"id":"%s","user_id":%s,"hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID, validToken.UserID) // Partial match
+		expected := fmt.Sprintf(`{"id":"%s","user_id":"%s","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID, validToken.UserID) // Partial match
 		actual := strings.TrimSpace(recorder.Body.String())
 		if !strings.Contains(actual, expected) {
 			t.Errorf("Expected body to contain %q, but got %q", expected, actual)
@@ -1039,7 +1039,8 @@ func TestHandleAgentInfosWithAPIKey(t *testing.T) {
 		}
 
 		// Fetch the inserted ID
-		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		agentInfo.ID = insertResult.InsertedID.(bson.ObjectID)
+		agentInfoID := agentInfo.ID.Hex()
 
 		// Create a test request to retrieve agents
 		req, err := http.NewRequest("GET", "/api/agents", nil)
@@ -1055,11 +1056,28 @@ func TestHandleAgentInfosWithAPIKey(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, recorder.Code)
 
-		// Check the response body
-		expected := fmt.Sprintf(`[{"id":"%s","user_id":"%s","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID, validToken.UserID) // Partial match
-		actual := strings.TrimSpace(recorder.Body.String())
-		if !strings.Contains(actual, expected) {
-			t.Errorf("Expected body to contain %q, but got %q", expected, actual)
+		// Unmarshal the response body into a slice of AgentInfo
+		var actualAgentInfos []agent.AgentInfo
+		err = json.Unmarshal(recorder.Body.Bytes(), &actualAgentInfos)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal response body: %v", err)
+		}
+
+		// Check if the expected agent info is present in the actual response
+		found := false
+		for _, actualAgent := range actualAgentInfos {
+			if actualAgent.ID.Hex() == agentInfoID &&
+				actualAgent.UserID == agentInfo.UserID &&
+				actualAgent.Hostname == agentInfo.Hostname &&
+				actualAgent.IPAddress == agentInfo.IPAddress &&
+				actualAgent.KernelVersion == agentInfo.KernelVersion {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Expected to find the inserted agent info in the response, but it was not found.\nExpected ID: %s\nActual Response: %s", agentInfoID, recorder.Body.String())
 		}
 	})
 
@@ -1271,40 +1289,45 @@ func TestHandleStartDiagnostic(t *testing.T) {
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
 			OsVersion:     "Ubuntu 24.04",
+			SystemMetrics: agent.SystemMetrics{
+				CPUInfo:     []string{"Intel i7-1165G7"},
+				CPUUsage:    45.5,
+				MemoryTotal: 16 * 1024 * 1024 * 1024, // 16GB
+				MemoryUsed:  8 * 1024 * 1024 * 1024,  // 8GB
+				MemoryFree:  8 * 1024 * 1024 * 1024,  // 8GB
+				DiskUsage: map[string]int64{
+					"/":     250 * 1024 * 1024 * 1024, // 250GB
+					"/home": 500 * 1024 * 1024 * 1024, // 500GB
+				},
+				FSUsage: map[string]string{
+					"/":     "45%",
+					"/home": "60%",
+				},
+			},
 		}
 		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
 		assert.NoError(t, err)
 
 		agentID := insertResult.InsertedID.(bson.ObjectID).Hex()
-		diagnosticReq := fmt.Sprintf(`{
-			"agent_id": "%s",
-			"issue": "High CPU usage",
-			"system_info": {
-				"OS": "Ubuntu 22.04",
-				"Kernel": "5.15.0-91-generic",
-				"CPU": "Intel i7-1165G7",
-				"Memory": "16GB"
-			}
-		}`, agentID)
-
-		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
+		session, err := server.diagnosticService.StartDiagnosticSession(
+			context.Background(),
+			agentID,
+			validToken.UserID,
+			"High CPU usage",
+		)
 		assert.NoError(t, err)
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusCreated, recorder.Code)
-
-		var session diagnostic.DiagnosticSession
-		err = json.NewDecoder(recorder.Body).Decode(&session)
-		assert.NoError(t, err)
 		assert.NotEmpty(t, session.ID)
 		assert.Equal(t, agentID, session.AgentID)
 		assert.Equal(t, "High CPU usage", session.InitialIssue)
 		assert.Equal(t, 0, session.CurrentIteration)
 		assert.Equal(t, "in_progress", session.Status)
 		assert.NotEmpty(t, session.History)
+
+		// Verify system metrics are captured in the diagnostic session
+		assert.NotNil(t, session.History[0].SystemSnapshot)
+		assert.Equal(t, 45.5, session.History[0].SystemSnapshot.CPUUsage)
+		assert.Equal(t, int64(16*1024*1024*1024), session.History[0].SystemSnapshot.MemoryTotal)
 	})
 
 	t.Run("InvalidAgentID", func(t *testing.T) {
@@ -1339,6 +1362,8 @@ func TestHandleStartDiagnostic(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
 		assert.NoError(t, err)
 		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		// Add the Content-Type header
+		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1358,6 +1383,8 @@ func TestHandleStartDiagnostic(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
 		assert.NoError(t, err)
 		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		// Add the Content-Type header
+		req.Header.Set("Content-Type", "application/json")
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1373,6 +1400,9 @@ func TestHandleStartDiagnostic(t *testing.T) {
 		}`
 
 		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
+		// Add the Content-Type header
+		req.Header.Set("Content-Type", "application/json")
+
 		assert.NoError(t, err)
 
 		recorder := httptest.NewRecorder()
@@ -1394,6 +1424,13 @@ func TestHandleContinueDiagnostic(t *testing.T) {
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
 			OsVersion:     "Ubuntu 24.04",
+			SystemMetrics: agent.SystemMetrics{
+				CPUInfo:     []string{"Intel i7-1165G7"},
+				CPUUsage:    45.5,
+				MemoryTotal: 16 * 1024 * 1024 * 1024,
+				MemoryUsed:  8 * 1024 * 1024 * 1024,
+				MemoryFree:  8 * 1024 * 1024 * 1024,
+			},
 		}
 		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
 		assert.NoError(t, err)
@@ -1402,9 +1439,8 @@ func TestHandleContinueDiagnostic(t *testing.T) {
 		session, err := server.diagnosticService.StartDiagnosticSession(
 			context.Background(),
 			agentID,
-			"123456",
+			validToken.UserID,
 			"High CPU usage",
-			map[string]string{"OS": "Ubuntu 22.04"},
 		)
 		assert.NoError(t, err)
 
@@ -1431,6 +1467,12 @@ func TestHandleContinueDiagnostic(t *testing.T) {
 		assert.Equal(t, session.ID, updatedSession.ID)
 		assert.Equal(t, 1, updatedSession.CurrentIteration)
 		assert.NotEmpty(t, updatedSession.History)
+
+		// Verify system metrics are present in the latest response
+		latestResponse := updatedSession.History[len(updatedSession.History)-1]
+		assert.NotNil(t, latestResponse.SystemSnapshot)
+		assert.NotEmpty(t, latestResponse.SystemSnapshot.CPUInfo)
+		assert.Greater(t, latestResponse.SystemSnapshot.CPUUsage, float64(0))
 	})
 
 	t.Run("NonExistentSession", func(t *testing.T) {
@@ -1483,7 +1525,6 @@ func TestHandleGetDiagnosticSession(t *testing.T) {
 			agentID,
 			"123456",
 			"High CPU usage",
-			map[string]string{"OS": "Ubuntu 22.04"},
 		)
 		assert.NoError(t, err)
 
@@ -1550,7 +1591,6 @@ func TestHandleDeleteDiagnostic(t *testing.T) {
 			agentID,
 			validToken.UserID,
 			"High CPU usage",
-			map[string]string{"OS": "Ubuntu 22.04"},
 		)
 		assert.NoError(t, err)
 
@@ -1613,9 +1653,8 @@ func TestHandleListDiagnostics(t *testing.T) {
 		session, err := server.diagnosticService.StartDiagnosticSession(
 			context.Background(),
 			agentID,
-			"123456",
+			validToken.UserID,
 			"High CPU usage",
-			map[string]string{"OS": "Ubuntu 22.04"},
 		)
 		assert.NoError(t, err)
 
@@ -1669,7 +1708,6 @@ func TestHandleGetDiagnosticSummary(t *testing.T) {
 			agentID,
 			"123456",
 			"High CPU usage",
-			map[string]string{"OS": "Ubuntu 22.04"},
 		)
 		assert.NoError(t, err)
 

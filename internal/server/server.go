@@ -903,16 +903,16 @@ func (s *Server) handleGetChatByID() http.HandlerFunc {
 	}
 }
 
-// handleStartDiagnostic initiates a new diagnostic session
-// @Summary Start a new diagnostic session
-// @Description Start a new Linux system diagnostic session
+// handleStartDiagnostic starts a new diagnostic session
+// @Summary Start diagnostic session
+// @Description Start a new diagnostic session for an agent
 // @Tags diagnostic
 // @Accept json
 // @Produce json
-// @Param request body diagnostic.DiagnosticRequest true "Diagnostic request"
+// @Param request body StartDiagnosticRequest true "Start diagnostic request"
 // @Success 201 {object} diagnostic.DiagnosticSession
-// @Failure 400 {string} string "Invalid request"
-// @Failure 401 {string} string "User not authenticated"
+// @Failure 400 {string} string "Invalid request format"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Internal server error"
 // @Router /api/diagnostic [post]
 func (s *Server) handleStartDiagnostic() http.HandlerFunc {
@@ -922,27 +922,29 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 		// Check if user is authenticated
 		userID, _ := GetUserFromContext(r)
 		if userID == "" {
-			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "User not authenticated"})
 			return
 		}
 
 		var req struct {
-			AgentID    string            `json:"agent_id"`
-			Issue      string            `json:"issue"`
-			SystemInfo map[string]string `json:"system_info"`
+			AgentID string `json:"agent_id"`
+			Issue   string `json:"issue"`
 		}
 
 		if err := parseRequestJSON(r, &req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 
 		if req.AgentID == "" || req.Issue == "" {
-			http.Error(w, "Agent ID and Issue are required", http.StatusBadRequest)
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Agent ID and Issue are required"})
 			return
 		}
 
-		session, err := s.diagnosticService.StartDiagnosticSession(r.Context(), req.AgentID, userID, req.Issue, req.SystemInfo)
+		session, err := s.diagnosticService.StartDiagnosticSession(r.Context(), req.AgentID, userID, req.Issue)
 		if err != nil {
 			statusCode := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "invalid agent ID format") {
@@ -952,7 +954,8 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 			} else if strings.Contains(err.Error(), "agent does not belong to user") {
 				statusCode = http.StatusForbidden
 			}
-			http.Error(w, err.Error(), statusCode)
+			w.WriteHeader(statusCode)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 

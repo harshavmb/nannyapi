@@ -3,6 +3,7 @@ package diagnostic
 import (
 	"testing"
 
+	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,27 +22,34 @@ func TestBuildUserPrompt(t *testing.T) {
 
 	req := &DiagnosticRequest{
 		Issue: "High CPU usage",
-		SystemInfo: map[string]string{
-			"OS":     "Ubuntu 22.04",
-			"Kernel": "5.15.0",
-			"CPU":    "Intel i7",
+		SystemMetrics: &agent.SystemMetrics{
+			CPUInfo:     []string{"Intel i7-1165G7"},
+			CPUUsage:    85.5,
+			MemoryTotal: 16 * 1024 * 1024 * 1024,
+			MemoryUsed:  14 * 1024 * 1024 * 1024,
+			MemoryFree:  2 * 1024 * 1024 * 1024,
+			DiskUsage: map[string]int64{
+				"/": 250 * 1024 * 1024 * 1024,
+			},
+			FSUsage: map[string]string{
+				"/": "85.5%",
+			},
 		},
-		Iteration: 1,
-		CommandResults: []string{
-			"top - 14:30:00 up 7 days, load average: 2.15, 1.92, 1.74",
-		},
+		Iteration: 0,
 	}
 
 	// Test initial request prompt
-	initialReq := *req
-	initialReq.Iteration = 0
-	initialReq.CommandResults = nil
-	prompt := client.buildUserPrompt(&initialReq)
+	prompt := client.buildUserPrompt(req)
 	assert.Contains(t, prompt, "Suggest diagnostic commands")
+	assert.Contains(t, prompt, "85.5%")
 	assert.Contains(t, prompt, "High CPU usage")
-	assert.Contains(t, prompt, "Ubuntu 22.04")
+	assert.Contains(t, prompt, "Intel i7")
 
 	// Test analysis prompt with command results
+	req.Iteration = 1
+	req.CommandResults = []string{
+		"top - 14:30:00 up 7 days, load average: 2.15, 1.92, 1.74",
+	}
 	analysisPrompt := client.buildUserPrompt(req)
 	assert.Contains(t, analysisPrompt, "Analyze these Linux command results")
 	assert.Contains(t, analysisPrompt, "load average: 2.15")

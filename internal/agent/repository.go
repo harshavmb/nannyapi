@@ -24,6 +24,22 @@ func (r *AgentInfoRepository) InsertAgentInfo(ctx context.Context, agentInfo *Ag
 	return r.collection.InsertOne(ctx, agentInfo)
 }
 
+func (r *AgentInfoRepository) UpdateAgentInfo(ctx context.Context, info *AgentInfo) error {
+	filter := bson.M{"_id": info.ID}
+	update := bson.M{"$set": info}
+
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update agent info: %v", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("agent not found: %v", info.ID)
+	}
+
+	return nil
+}
+
 func (r *AgentInfoRepository) GetAgentInfoByID(ctx context.Context, id bson.ObjectID) (*AgentInfo, error) {
 	filter := bson.M{"_id": id}
 

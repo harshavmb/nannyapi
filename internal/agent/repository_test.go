@@ -52,6 +52,21 @@ func TestAgentInfoRepository(t *testing.T) {
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
 			OsVersion:     "Ubuntu 24.04",
+			SystemMetrics: SystemMetrics{
+				CPUInfo:     []string{"Intel i7-1165G7"},
+				CPUUsage:    45.5,
+				MemoryTotal: 16 * 1024 * 1024 * 1024, // 16GB
+				MemoryUsed:  8 * 1024 * 1024 * 1024,  // 8GB
+				MemoryFree:  8 * 1024 * 1024 * 1024,  // 8GB
+				DiskUsage: map[string]int64{
+					"/":     250 * 1024 * 1024 * 1024, // 250GB
+					"/home": 500 * 1024 * 1024 * 1024, // 500GB
+				},
+				FSUsage: map[string]string{
+					"/":     "45%",
+					"/home": "60%",
+				},
+			},
 		}
 
 		result, err := repo.InsertAgentInfo(context.Background(), agentInfo)
@@ -64,6 +79,39 @@ func TestAgentInfoRepository(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, insertedAgentInfo)
 		assert.Equal(t, agentInfo.UserID, insertedAgentInfo.UserID)
+		assert.Equal(t, agentInfo.SystemMetrics.CPUUsage, insertedAgentInfo.SystemMetrics.CPUUsage)
+		assert.Equal(t, agentInfo.SystemMetrics.MemoryTotal, insertedAgentInfo.SystemMetrics.MemoryTotal)
+	})
+
+	t.Run("UpdateAgentInfo", func(t *testing.T) {
+		// First insert an agent
+		agentInfo := &AgentInfo{
+			UserID:        "123456",
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+			SystemMetrics: SystemMetrics{
+				CPUUsage: 45.5,
+			},
+		}
+
+		result, err := repo.InsertAgentInfo(context.Background(), agentInfo)
+		assert.NoError(t, err)
+
+		// Update the agent info
+		agentInfo.ID = result.InsertedID.(bson.ObjectID)
+		agentInfo.SystemMetrics.CPUUsage = 75.0
+		agentInfo.SystemMetrics.MemoryUsed = 12 * 1024 * 1024 * 1024 // 12GB
+
+		err = repo.UpdateAgentInfo(context.Background(), agentInfo)
+		assert.NoError(t, err)
+
+		// Verify the update
+		updatedAgentInfo, err := repo.GetAgentInfoByID(context.Background(), agentInfo.ID)
+		assert.NoError(t, err)
+		assert.Equal(t, 75.0, updatedAgentInfo.SystemMetrics.CPUUsage)
+		assert.Equal(t, int64(12*1024*1024*1024), updatedAgentInfo.SystemMetrics.MemoryUsed)
 	})
 
 	t.Run("GetAgentInfoByID", func(t *testing.T) {

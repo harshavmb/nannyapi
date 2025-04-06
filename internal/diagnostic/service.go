@@ -29,7 +29,7 @@ func NewDiagnosticService(apiKey string, repository *DiagnosticRepository, agent
 }
 
 // StartDiagnosticSession initiates a new diagnostic session
-func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, agentID string, userID string, issue string, systemInfo map[string]string) (*DiagnosticSession, error) {
+func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, agentID string, userID string, issue string) (*DiagnosticSession, error) {
 	// Validate agent exists
 	agentObjectID, err := bson.ObjectIDFromHex(agentID)
 	if err != nil {
@@ -72,10 +72,11 @@ func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, agentID 
 
 	session.ID = sessionID
 
+	// Use agent's current metrics for initial diagnosis
 	req := &DiagnosticRequest{
-		Issue:      issue,
-		SystemInfo: systemInfo,
-		Iteration:  0,
+		Issue:         issue,
+		SystemMetrics: &agentInfo.SystemMetrics,
+		Iteration:     0,
 	}
 
 	resp, err := s.client.DiagnoseIssue(req)
@@ -83,6 +84,8 @@ func (s *DiagnosticService) StartDiagnosticSession(ctx context.Context, agentID 
 		return session, fmt.Errorf("failed to diagnose issue: %v", err)
 	}
 
+	// Store current system metrics with the diagnostic response
+	resp.SystemSnapshot = &agentInfo.SystemMetrics
 	session.History = append(session.History, *resp)
 	session.UpdatedAt = time.Now()
 
@@ -116,9 +119,20 @@ func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessi
 		return session, nil
 	}
 
+	// Get current agent info to check for system changes
+	agentObjectID, err := bson.ObjectIDFromHex(session.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid agent ID format")
+	}
+
+	agentInfo, err := s.agentService.GetAgentInfoByID(ctx, agentObjectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent info: %v", err)
+	}
+
 	req := &DiagnosticRequest{
 		Issue:          session.InitialIssue,
-		SystemInfo:     make(map[string]string),
+		SystemMetrics:  &agentInfo.SystemMetrics,
 		CommandResults: results,
 		Iteration:      session.CurrentIteration + 1,
 	}
@@ -139,7 +153,14 @@ func (s *DiagnosticService) ContinueDiagnosticSession(ctx context.Context, sessi
 		return session, nil
 	}
 
-	// On success, add response to history and update session
+	// Check if system metrics have changed significantly
+	lastMetrics := session.History[len(session.History)-1].SystemSnapshot
+	if s.agentService.HasSystemMetricsChanged(*lastMetrics, agentInfo.SystemMetrics) {
+		resp.NextStep += "\n[ALERT] Significant system changes detected since last check."
+	}
+
+	// Store current system metrics with the diagnostic response
+	resp.SystemSnapshot = &agentInfo.SystemMetrics
 	session.History = append(session.History, *resp)
 	session.CurrentIteration++
 	session.UpdatedAt = time.Now()
