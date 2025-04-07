@@ -99,9 +99,13 @@ General Rules:
 func (c *DeepSeekClient) buildUserPrompt(req *DiagnosticRequest) string {
 	if req.Iteration > 0 && len(req.CommandResults) > 0 {
 		var analysisGuidance string
+		context := fmt.Sprintf("Original Issue: %s\n\nPrevious Context: %s\n\n",
+			req.Issue,
+			"Please maintain focus on the original issue. Ignore irrelevant inputs that do not contribute to diagnosis.")
+
 		switch {
 		case strings.Contains(strings.ToLower(req.Issue), "database"):
-			analysisGuidance = "Analyze PostgreSQL Database Performance:\n" +
+			analysisGuidance = context + "Analyze PostgreSQL Database Performance:\n" +
 				"REQUIRED Response Elements:\n" +
 				"1. Use diagnosis_type='database'\n" +
 				"2. Include ALL terms in next_step:\n" +
@@ -118,7 +122,7 @@ func (c *DeepSeekClient) buildUserPrompt(req *DiagnosticRequest) string {
 
 		case strings.Contains(strings.ToLower(req.Issue), "network") ||
 			strings.Contains(strings.ToLower(req.Issue), "connection"):
-			analysisGuidance = "Analyze Network Performance:\n" +
+			analysisGuidance = context + "Analyze Network Performance:\n" +
 				"REQUIRED Response Elements:\n" +
 				"1. Use diagnosis_type='network'\n" +
 				"2. Include ALL terms in next_step:\n" +
@@ -134,7 +138,7 @@ func (c *DeepSeekClient) buildUserPrompt(req *DiagnosticRequest) string {
 				"4. Provide clear next troubleshooting steps"
 
 		case strings.Contains(strings.ToLower(req.Issue), "memory"):
-			analysisGuidance = "Analyze Memory Usage:\n" +
+			analysisGuidance = context + "Analyze Memory Usage:\n" +
 				"REQUIRED Response Elements:\n" +
 				"1. Use diagnosis_type='memory_leak'\n" +
 				"2. Include ALL terms in next_step:\n" +
@@ -151,7 +155,7 @@ func (c *DeepSeekClient) buildUserPrompt(req *DiagnosticRequest) string {
 				"4. Provide memory optimization guidance"
 
 		default:
-			analysisGuidance = "System Analysis Requirements:\n" +
+			analysisGuidance = context + "System Analysis Requirements:\n" +
 				"1. Use appropriate diagnosis_type\n" +
 				"2. Include relevant system metrics\n" +
 				"3. Reference process " + extractPID(req.CommandResults) + "\n" +
@@ -160,7 +164,7 @@ func (c *DeepSeekClient) buildUserPrompt(req *DiagnosticRequest) string {
 
 		return fmt.Sprintf(
 			"Analyze these Linux command results for issue '%s'.\n\nResponse Requirements:\n%s\n\nCommand Results:\n%s\n\n"+
-				"Your response MUST include ALL required terms in the analysis guidance.",
+				"Your response MUST include ALL required terms in the analysis guidance and stay focused on the original issue.",
 			req.Issue,
 			analysisGuidance,
 			strings.Join(req.CommandResults, "\n"),
@@ -170,18 +174,14 @@ func (c *DeepSeekClient) buildUserPrompt(req *DiagnosticRequest) string {
 	// Initial request handling
 	var systemInfo []string
 	if req.SystemMetrics != nil {
-		if len(req.SystemMetrics.CPUInfo) > 0 {
-			systemInfo = append(systemInfo, fmt.Sprintf("CPU Model: %s", strings.Join(req.SystemMetrics.CPUInfo, ", ")))
-		}
-
-		memoryGiB := float64(req.SystemMetrics.MemoryTotal) / (1024 * 1024 * 1024)
-		usedGiB := float64(req.SystemMetrics.MemoryUsed) / (1024 * 1024 * 1024)
-		freeGiB := float64(req.SystemMetrics.MemoryFree) / (1024 * 1024 * 1024)
-		memUsagePercent := (usedGiB / memoryGiB) * 100
+		totalMemoryGiB := float64(req.SystemMetrics.MemoryTotal) / (1024 * 1024 * 1024)
+		usedMemoryGiB := float64(req.SystemMetrics.MemoryUsed) / (1024 * 1024 * 1024)
+		freeMemoryGiB := float64(req.SystemMetrics.MemoryFree) / (1024 * 1024 * 1024)
+		memUsagePercent := (usedMemoryGiB / totalMemoryGiB) * 100
 
 		systemInfo = append(systemInfo,
 			fmt.Sprintf("Memory: Total: %.2f GiB, Used: %.2f GiB (%.1f%%), Free: %.2f GiB",
-				memoryGiB, usedGiB, memUsagePercent, freeGiB))
+				totalMemoryGiB, usedMemoryGiB, memUsagePercent, freeMemoryGiB))
 
 		if req.SystemMetrics.CPUUsage > 0 {
 			systemInfo = append(systemInfo, fmt.Sprintf("CPU Usage: %.1f%%", req.SystemMetrics.CPUUsage))
@@ -193,18 +193,18 @@ func (c *DeepSeekClient) buildUserPrompt(req *DiagnosticRequest) string {
 		}
 	}
 
-	analysisType := "undetermined"
-	requiredTerms := "\nRequired Terms in Response:\n"
+	var analysisType string
+	var requiredTerms string
 	switch {
 	case strings.Contains(strings.ToLower(req.Issue), "database"):
 		analysisType = "database"
-		requiredTerms += "- disk i/o, postgresql, connections, query performance, process monitoring\n"
+		requiredTerms = "- disk i/o, postgresql, connections, query performance, process monitoring\n"
 	case strings.Contains(strings.ToLower(req.Issue), "network"):
 		analysisType = "network"
-		requiredTerms += "- tcp flags, connection analysis, latency, socket buffers, packet monitoring\n"
+		requiredTerms = "- tcp flags, connection analysis, latency, socket buffers, packet monitoring\n"
 	case strings.Contains(strings.ToLower(req.Issue), "memory"):
 		analysisType = "memory_leak"
-		requiredTerms += "- memory leak, heap, cache, buffer, memory consumption, process monitoring\n"
+		requiredTerms = "- memory leak, heap, cache, buffer, memory consumption, process monitoring\n"
 	}
 
 	return fmt.Sprintf(

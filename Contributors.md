@@ -69,7 +69,7 @@ Thank you for your interest in contributing to NannyAPI! This document provides 
 - Create an issue for bug reports
 - Use discussions for questions
 - Tag maintainers for urgent issues
-- Join our community chat for real-time help
+- Use the issue tracker for technical discussions
 
 ## Security Issues
 

@@ -10,12 +10,12 @@ import (
 )
 
 func InitDB() (*mongo.Database, error) {
-	var mongodb_uri string
-	if mongodb_uri = os.Getenv("MONGODB_URI"); mongodb_uri == "" {
+	var mongodbURI string
+	if mongodbURI = os.Getenv("MONGODB_URI"); mongodbURI == "" {
 		log.Fatal("You must set your 'MONGODB_URI' environment variable. See\n\t https://www.mongodb.com/docs/drivers/go/current/usage-examples/#environment-variable")
 	}
 
-	client, err := mongo.Connect(options.Client().ApplyURI(mongodb_uri))
+	client, err := mongo.Connect(options.Client().ApplyURI(mongodbURI))
 	if err != nil {
 		log.Fatal("error while connecting to mongodb: ", err)
 		return nil, err

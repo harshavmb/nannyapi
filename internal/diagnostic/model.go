@@ -44,6 +44,18 @@ type DiagnosticRequest struct {
 	PreviousResults []string             `json:"previous_results,omitempty" bson:"previous_results,omitempty"`
 }
 
+// StartDiagnosticRequest represents a request to start a diagnostic session.
+type StartDiagnosticRequest struct {
+	AgentID string `json:"agent_id" bson:"agent_id"`
+	Issue   string `json:"issue" bson:"issue"`
+}
+
+// ContinueDiagnosticRequest represents a request to continue a diagnostic session.
+type ContinueDiagnosticRequest struct {
+	DiagnosticOutput []string             `json:"diagnostic_output"`
+	SystemMetrics    *agent.SystemMetrics `json:"system_metrics,omitempty"`
+}
+
 // DiagnosticSession tracks the state of a diagnostic session.
 type DiagnosticSession struct {
 	ID               bson.ObjectID        `json:"id" bson:"_id,omitempty"`

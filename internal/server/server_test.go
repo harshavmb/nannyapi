@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,7 +20,6 @@ import (
 
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
-	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
@@ -69,19 +67,17 @@ func setupServer(t *testing.T) (*Server, func(), token.Token, string) {
 	tokenRepository := token.NewTokenRepository(client.Database(testDBName))
 	refreshTokenRepository := token.NewRefreshTokenRepository(client.Database(testDBName))
 	agentInfoRepository := agent.NewAgentInfoRepository(client.Database(testDBName))
-	ChatRepository := chat.NewChatRepository(client.Database(testDBName))
 	diagnosticRepository := diagnostic.NewDiagnosticRepository(client.Database(testDBName))
 
 	// Mock Services
 	mockUserService := user.NewUserService(userRepository)
 	agentInfoservice := agent.NewAgentInfoService(agentInfoRepository)
-	chatService := chat.NewChatService(ChatRepository, agentInfoservice)
 	mockTokenService := token.NewTokenService(tokenRepository)
 	mockRefreshTokenService := token.NewRefreshTokenService(refreshTokenRepository)
 	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepository, agentInfoservice)
 
 	// Create a new server instance
-	server := NewServer(mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, diagnosticService, jwtSecret, encryptionKey)
+	server := NewServer(mockGitHubAuth, mockUserService, agentInfoservice, mockTokenService, mockRefreshTokenService, diagnosticService, jwtSecret, encryptionKey)
 
 	// Create a valid auth token for the test user
 	testUser := &user.User{
@@ -563,401 +559,6 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		if actual != expected {
 			t.Errorf("Expected body %q, but got %q", expected, actual)
 		}
-	})
-}
-
-func TestHandleStartChat(t *testing.T) {
-	server, cleanup, validToken, _ := setupServer(t)
-	defer cleanup()
-
-	t.Run("ValidRequest", func(t *testing.T) {
-		// Insert test agent info into the database
-		agentInfo := &agent.AgentInfo{
-			UserID:        validToken.UserID,
-			Hostname:      "test-host",
-			IPAddress:     "192.168.1.1",
-			KernelVersion: "5.10.0",
-			OsVersion:     "Ubuntu 24.04",
-		}
-		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
-		if err != nil {
-			t.Fatalf("Failed to save agent info: %v", err)
-		}
-
-		// Fetch the inserted ID
-		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
-
-		chat := fmt.Sprintf(`{"agent_id":"%s"}`, agentInfoID)
-		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		assert.NoError(t, err)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusCreated, recorder.Code)
-
-		// Check the response body
-		var response map[string]string
-		err = json.NewDecoder(recorder.Body).Decode(&response)
-		if err != nil {
-			t.Fatalf("Could not decode response body: %v", err)
-		}
-
-		id, ok := response["id"]
-		if !ok {
-			t.Errorf("Expected response to contain 'id' field")
-		}
-
-		if _, err := bson.ObjectIDFromHex(id); err != nil {
-			t.Errorf("Expected 'id' field to be a valid ObjectID, but got %v", id)
-		}
-	})
-
-	t.Run("InvalidAgentID", func(t *testing.T) {
-		chat := fmt.Sprintf(`{"agent_id":"%s"}`, "agent1")
-		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		assert.NoError(t, err)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-
-		// Check the response body
-		expected := "Invalid agent_id passed"
-		actual := strings.TrimSpace(recorder.Body.String())
-		if !strings.Contains(actual, expected) { // partial match
-			t.Errorf("Expected body %q, but got %q", expected, actual)
-		}
-	})
-
-	t.Run("NonExistentAgent", func(t *testing.T) {
-		chat := fmt.Sprintf(`{"agent_id":"%s"}`, bson.NewObjectID().Hex())
-		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		assert.NoError(t, err)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-
-		// Check the response body
-		expected := "agent_id doesn't exist"
-		actual := strings.TrimSpace(recorder.Body.String())
-		if !strings.Contains(actual, expected) { // partial match
-			t.Errorf("Expected body %q, but got %q", expected, actual)
-		}
-	})
-
-	t.Run("InvalidRequestPayload", func(t *testing.T) {
-		requestBody := `{"invalid_field":"value"}`
-		req, err := http.NewRequest("POST", "/api/chat", bytes.NewBufferString(requestBody))
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		assert.NoError(t, err)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	})
-}
-
-func TestChatService_AddPromptResponse(t *testing.T) {
-	server, cleanup, validToken, _ := setupServer(t)
-	defer cleanup()
-
-	t.Run("ValidRequestText", func(t *testing.T) {
-		// Insert test agent info into the database
-		agentInfo := &agent.AgentInfo{
-			UserID:        validToken.UserID,
-			Hostname:      "test-host",
-			IPAddress:     "192.168.1.1",
-			KernelVersion: "5.10.0",
-			OsVersion:     "Ubuntu 24.04",
-		}
-		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
-		if err != nil {
-			t.Fatalf("Failed to save agent info: %v", err)
-		}
-
-		// Fetch the inserted ID
-		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
-
-		// Insert a chat to update
-		initialChat := &chat.Chat{
-			AgentID: agentInfoID,
-			History: generateHistory(
-				[]string{"Initial prompt"},
-				[]string{"Initial response"},
-				[]string{"text"},
-			),
-		}
-		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
-		assert.NoError(t, err)
-
-		chatID := intialChatResult.InsertedID.(bson.ObjectID).Hex()
-
-		// Update the chat with a new prompt-response pair
-		reqBody := `{"prompt":"Hello","response":"Hi there!","type":"text"}`
-		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
-		assert.NoError(t, err)
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusOK, recorder.Code)
-
-		var updatedChat chat.Chat
-		err = json.NewDecoder(recorder.Body).Decode(&updatedChat)
-		assert.NoError(t, err)
-		assert.Len(t, updatedChat.History, 2)
-		assert.Equal(t, "Initial prompt", updatedChat.History[0].Prompt)
-		// assert.Equal(t, "Initial response", updatedChat.History[0].Response) ## won't work as response is randomized now
-		assert.Equal(t, "Hello", updatedChat.History[1].Prompt)
-		// assert.Equal(t, "Hi there!", updatedChat.History[1].Response) ## won't work as response is randomized now
-		assert.Equal(t, "text", updatedChat.History[1].Type)
-	})
-
-	t.Run("ValidRequestCommand", func(t *testing.T) {
-		// Insert test agent info into the database
-		agentInfo := &agent.AgentInfo{
-			UserID:        validToken.UserID,
-			Hostname:      "test-host",
-			IPAddress:     "192.168.1.1",
-			KernelVersion: "5.10.0",
-			OsVersion:     "Ubuntu 24.04",
-		}
-		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
-		if err != nil {
-			t.Fatalf("Failed to save agent info: %v", err)
-		}
-
-		// Fetch the inserted ID
-		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
-
-		// Insert a chat to update
-		initialChat := &chat.Chat{
-			AgentID: agentInfoID,
-			History: generateHistory(
-				[]string{"perform health checks"},
-				[]string{""},
-				[]string{"commands"},
-			),
-		}
-		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
-		assert.NoError(t, err)
-
-		chatID := intialChatResult.InsertedID.(bson.ObjectID).Hex()
-
-		// Update the chat with a new prompt-response pair
-		reqBody := `{"prompt":"11:42:27 up 36 days,  2:48,  3 users,  load average: 0.02, 0.03, 0.00","response":"","type":"text"}`
-		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
-		assert.NoError(t, err)
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusOK, recorder.Code)
-
-		var updatedChat chat.Chat
-		err = json.NewDecoder(recorder.Body).Decode(&updatedChat)
-		assert.NoError(t, err)
-		assert.Len(t, updatedChat.History, 2)
-		assert.Equal(t, "perform health checks", updatedChat.History[0].Prompt)
-		assert.Contains(t, updatedChat.History[0].Response, "uptime") // partial match to check uptime is in response
-		assert.Equal(t, "commands", updatedChat.History[0].Type)
-		assert.Contains(t, updatedChat.History[1].Prompt, "load average") // partial match to check load average is in prompt
-		assert.Equal(t, "text", updatedChat.History[1].Type)
-	})
-
-	t.Run("InValidRequestPayload", func(t *testing.T) {
-		// Insert test agent info into the database
-		agentInfo := &agent.AgentInfo{
-			UserID:        validToken.UserID,
-			Hostname:      "test-host",
-			IPAddress:     "192.168.1.1",
-			KernelVersion: "5.10.0",
-			OsVersion:     "Ubuntu 24.04",
-		}
-		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
-		if err != nil {
-			t.Fatalf("Failed to save agent info: %v", err)
-		}
-
-		// Fetch the inserted ID
-		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
-
-		// Insert a chat to update
-		initialChat := &chat.Chat{
-			AgentID: agentInfoID,
-			History: generateHistory(
-				[]string{"Initial prompt"},
-				[]string{"Initial response"},
-				[]string{"text"},
-			),
-		}
-		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
-		assert.NoError(t, err)
-
-		chatID := intialChatResult.InsertedID.(bson.ObjectID).Hex()
-
-		// Update the chat with a new prompt-response pair
-		reqBody := `{"response":"Hi there!"}`
-		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", chatID), strings.NewReader(reqBody))
-		assert.NoError(t, err)
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	})
-
-	t.Run("NonExistentChat", func(t *testing.T) {
-		// Update the chat with a new prompt-response pair
-		reqBody := `{"prompt":"Hello","response":"Hi there!","type":"text"}`
-		req, err := http.NewRequest("PUT", fmt.Sprintf("/api/chat/%s", bson.NewObjectID().Hex()), strings.NewReader(reqBody))
-		assert.NoError(t, err)
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusNotFound, recorder.Code)
-	})
-}
-
-func TestChatService_GetChatByID(t *testing.T) {
-	server, cleanup, validToken, _ := setupServer(t)
-	defer cleanup()
-
-	t.Run("ValidRequest", func(t *testing.T) {
-		// Insert test agent info into the database
-		agentInfo := &agent.AgentInfo{
-			UserID:        validToken.UserID,
-			Hostname:      "test-host",
-			IPAddress:     "192.168.1.1",
-			KernelVersion: "5.10.0",
-			OsVersion:     "Ubuntu 24.04",
-		}
-		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
-		if err != nil {
-			t.Fatalf("Failed to save agent info: %v", err)
-		}
-
-		// Fetch the inserted ID
-		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
-
-		// Insert a chat to update
-		initialChat := &chat.Chat{
-			AgentID: agentInfoID,
-			History: generateHistory(
-				[]string{"Initial prompt"},
-				[]string{"Initial response"},
-				[]string{"text"},
-			),
-		}
-		intialChatResult, err := server.chatService.StartChat(context.Background(), initialChat)
-		assert.NoError(t, err)
-
-		chatID := intialChatResult.InsertedID.(bson.ObjectID).Hex()
-		req, err := http.NewRequest("GET", fmt.Sprintf("/api/chat/%s", chatID), nil)
-		assert.NoError(t, err)
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusOK, recorder.Code)
-
-		var chat chat.Chat
-		err = json.NewDecoder(recorder.Body).Decode(&chat)
-		assert.NoError(t, err)
-		assert.NotNil(t, chat)
-		assert.Equal(t, agentInfoID, chat.AgentID)
-		assert.Equal(t, chatID, chat.ID.Hex())
-	})
-
-	t.Run("NonExistentChat", func(t *testing.T) {
-		// Insert test agent info into the database
-		agentInfo := &agent.AgentInfo{
-			UserID:        validToken.UserID,
-			Hostname:      "test-host",
-			IPAddress:     "192.168.1.1",
-			KernelVersion: "5.10.0",
-			OsVersion:     "Ubuntu 24.04",
-		}
-		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
-		if err != nil {
-			t.Fatalf("Failed to save agent info: %v", err)
-		}
-
-		// Fetch the inserted ID
-		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
-
-		// Insert a chat to update
-		initialChat := &chat.Chat{
-			AgentID: agentInfoID,
-			History: generateHistory(
-				[]string{"Initial prompt"},
-				[]string{"Initial response"},
-				[]string{"text"},
-			),
-		}
-		_, err = server.chatService.StartChat(context.Background(), initialChat)
-		assert.NoError(t, err)
-
-		req, err := http.NewRequest("GET", fmt.Sprintf("/api/chat/%s", bson.NewObjectID().Hex()), nil)
-		assert.NoError(t, err)
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusNotFound, recorder.Code)
-	})
-
-	t.Run("NoIDPassed", func(t *testing.T) {
-
-		req, err := http.NewRequest("GET", fmt.Sprintf("/api/chat/%s", ""), nil)
-		assert.NoError(t, err)
-
-		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
-
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, req)
-
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	})
 }
 
@@ -1470,7 +1071,7 @@ func TestHandleContinueDiagnostic(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
 
-		assert.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, http.StatusCreated, recorder.Code)
 
 		var updatedSession diagnostic.DiagnosticSession
 		err = json.NewDecoder(recorder.Body).Decode(&updatedSession)

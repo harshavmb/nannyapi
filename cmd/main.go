@@ -12,7 +12,6 @@ import (
 	"github.com/harshavmb/nannyapi/docs"
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
-	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/server"
 	"github.com/harshavmb/nannyapi/internal/token"
@@ -74,14 +73,12 @@ func main() {
 	agentInfoRepo := agent.NewAgentInfoRepository(mongoDB)
 	tokenRepo := token.NewTokenRepository(mongoDB)
 	refreshTokenRepo := token.NewRefreshTokenRepository(mongoDB)
-	chatRepo := chat.NewChatRepository(mongoDB)
 	diagnosticRepo := diagnostic.NewDiagnosticRepository(mongoDB)
 
 	userService := user.NewUserService(userRepo)
 	tokenService := token.NewTokenService(tokenRepo)
 	refreshTokenService := token.NewRefreshTokenService(refreshTokenRepo)
 	agentService := agent.NewAgentInfoService(agentInfoRepo)
-	chatService := chat.NewChatService(chatRepo, agentService)
 	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepo, agentService)
 
 	// Initialize GitHub OAuth
@@ -99,7 +96,6 @@ func main() {
 		githubAuth,
 		userService,
 		agentService,
-		chatService,
 		tokenService,
 		refreshTokenService,
 		diagnosticService,
@@ -121,9 +117,10 @@ func main() {
 		Addr:    ":" + port,
 		Handler: handler,
 		// G114 (CWE-676): Use of net/http serve function that has no support for setting timeouts (Confidence: HIGH, Severity: MEDIUM).
-		ReadTimeout:       5 * time.Second,   // Maximum duration for reading the entire request, including the body.
-		WriteTimeout:      10 * time.Second,  // Maximum duration for writing the response.
-		IdleTimeout:       120 * time.Second, // Maximum amount of time to wait for the next request when keep-alives are enabled.
+		// for now, use only ReadHeaderTimeout
+		//ReadTimeout:       5 * time.Second,   // Maximum duration for reading the entire request, including the body.
+		//WriteTimeout:      10 * time.Second,  // Maximum duration for writing the response.
+		//IdleTimeout:       120 * time.Second, // Maximum amount of time to wait for the next request when keep-alives are enabled.
 		ReadHeaderTimeout: 3 * time.Second,
 	}
 
