@@ -4,43 +4,65 @@ This guide will help you get started with NannyAPI development quickly.
 
 ## Prerequisites
 
-- Go 1.24 or higher
-- Docker and Docker Compose
-- Git
-- Make
+1. **Go 1.24+**
+   - Required for building and running the application
+   - [Install Go](https://golang.org/doc/install)
+
+2. **MongoDB**
+   - Required for data storage
+   - [Install MongoDB](https://docs.mongodb.com/manual/installation/)
+
+3. **Make**
+   - Required for running development scripts
+   - Usually pre-installed on Linux/Mac
+
+4. **Git**
+   - Required for version control
+   - [Install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
 
 ## Initial Setup
 
 1. Clone the repository:
-```bash
-git clone https://github.com/harshavmb/nannyapi.git
-cd nannyapi
-```
+   ```bash
+   git clone https://github.com/harshavmb/nannyapi.git
+   cd nannyapi
+   ```
 
-2. Run the development setup script:
-```bash
-./scripts/setup-dev.sh
-```
+2. Set up environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
 
-This script will:
-- Install required development tools
-- Set up your environment configuration
-- Generate API documentation
-- Start required services (MongoDB)
-- Run initial code quality checks
+3. Install dependencies:
+   ```bash
+   make deps
+   ```
+
+4. Set up development database:
+   ```bash
+   make setup-dev
+   ```
 
 ## Configuration
 
-After running the setup script, you need to:
+Required environment variables:
 
-1. Edit `.env` file with your configuration:
-   - Set `NANNY_ENCRYPTION_KEY` (32 bytes)
-   - Configure GitHub OAuth (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`)
-   - Set AI service API keys if needed
-
-2. Verify MongoDB connection:
 ```bash
-make run
+# MongoDB
+MONGODB_URI=mongodb://localhost:27017/nannyapi
+
+# Security
+NANNY_ENCRYPTION_KEY=your-32-byte-encryption-key
+JWT_SECRET=your-jwt-secret
+
+# GitHub OAuth
+GH_CLIENT_ID=your-github-client-id
+GH_CLIENT_SECRET=your-github-client-secret
+GH_REDIRECT_URL=http://localhost:8080/github/callback
+
+# AI Services
+DEEPSEEK_API_KEY=your-deepseek-api-key
 ```
 
 ## Development Workflow
@@ -98,33 +120,36 @@ make run
 4. Update tests
 5. Document changes
 
+## Testing
+
+Run all tests:
+```bash
+make test
+```
+
+Run specific tests:
+```bash
+go test ./internal/diagnostic/...
+```
+
 ## Troubleshooting
 
 ### Common Issues
 
 1. **MongoDB Connection Issues**
-   ```bash
-   docker-compose ps
-   docker-compose logs mongo
-   ```
+   - Check MongoDB is running
+   - Verify connection string
+   - Check network connectivity
 
-2. **Swagger Generation Errors**
-   ```bash
-   make swag
-   ```
+2. **Authentication Errors**
+   - Verify environment variables
+   - Check token expiration
+   - Validate API key format
 
-3. **Test Failures**
-   ```bash
-   make test
-   go test -v ./... -run TestSpecificFunction
-   ```
-
-### Getting Help
-
-- Check existing issues on GitHub
-- Review documentation in `/docs`
-- Ask in team chat
-- Create a new issue
+3. **Build Errors**
+   - Run `go mod tidy`
+   - Clear Go cache
+   - Check Go version
 
 ## Best Practices
 
@@ -152,7 +177,7 @@ make run
 
 ## Deployment
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 
 ## Contributing
 

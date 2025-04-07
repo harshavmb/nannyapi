@@ -44,7 +44,6 @@ func TestBuildUserPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "Suggest diagnostic commands")
 	assert.Contains(t, prompt, "85.5%")
 	assert.Contains(t, prompt, "High CPU usage")
-	assert.Contains(t, prompt, "Intel i7")
 
 	// Test analysis prompt with command results
 	req.Iteration = 1

@@ -17,7 +17,6 @@ import (
 
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
-	"github.com/harshavmb/nannyapi/internal/chat"
 	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
@@ -29,7 +28,6 @@ type Server struct {
 	githubAuth          *auth.GitHubAuth
 	userService         *user.UserService
 	agentInfoService    *agent.AgentInfoService
-	chatService         *chat.ChatService
 	tokenService        *token.TokenService
 	refreshTokenservice *token.RefreshTokenService
 	diagnosticService   *diagnostic.DiagnosticService
@@ -42,7 +40,6 @@ type Server struct {
 
 // StartDiagnosticRequest represents a request to start a diagnostic session.
 type StartDiagnosticRequest struct {
-	ChatID     string            `json:"chat_id"`
 	Issue      string            `json:"issue"`
 	SystemInfo map[string]string `json:"system_info"`
 }
@@ -53,7 +50,7 @@ type ContinueDiagnosticRequest struct {
 }
 
 // NewServer creates a new Server instance.
-func NewServer(githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, diagnosticService *diagnostic.DiagnosticService, jwtSecret, nannyEncryptionKey string) *Server {
+func NewServer(githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, diagnosticService *diagnostic.DiagnosticService, jwtSecret, nannyEncryptionKey string) *Server {
 	mux := http.NewServeMux()
 
 	// override default nanny API port if NANNY_API_PORT is set
@@ -75,7 +72,7 @@ func NewServer(githubAuth *auth.GitHubAuth, userService *user.UserService, agent
 		gitHubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", nannyAPIPort) // Default GitHubCallback URL
 	}
 
-	server := &Server{mux: mux, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, diagnosticService: diagnosticService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret, nannyEncryptionKey: nannyEncryptionKey}
+	server := &Server{mux: mux, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, tokenService: tokenService, refreshTokenservice: refreshTokenService, diagnosticService: diagnosticService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret, nannyEncryptionKey: nannyEncryptionKey}
 	server.routes()
 	return server
 }
@@ -99,16 +96,12 @@ func (s *Server) routes() {
 	apiMux.HandleFunc("POST /api/auth-token", s.handleCreateAuthToken())
 	apiMux.HandleFunc("/api/auth-tokens", s.handleGetAuthTokens())
 	apiMux.Handle("/api/user-auth-token", s.handleFetchUserInfoFromToken())
-	apiMux.Handle("GET /api/user/{param}", s.handleFetchUserInfo())
+	apiMux.Handle("GET /api/user/{id}", s.handleFetchUserInfo())
 	apiMux.Handle("DELETE /api/auth-token/{id}", s.handleDeleteAuthToken())
 	apiMux.HandleFunc("POST /api/agent-info", s.handleAgentInfo())
 	apiMux.HandleFunc("GET /api/agent-info/", s.handleGetAgentInfoByID())
 	apiMux.HandleFunc("GET /api/agent-info/{id}", s.handleGetAgentInfoByID())
 	apiMux.HandleFunc("GET /api/agents", s.handleAgentInfos())
-	apiMux.HandleFunc("POST /api/chat", s.handleStartChat())
-	apiMux.HandleFunc("PUT /api/chat/{id}", s.handleAddPromptResponse())
-	apiMux.HandleFunc("GET /api/chat/", s.handleGetChatByID())
-	apiMux.HandleFunc("GET /api/chat/{id}", s.handleGetChatByID())
 
 	// Diagnostic Endpoints
 	apiMux.HandleFunc("POST /api/diagnostic", s.handleStartDiagnostic())
@@ -146,7 +139,7 @@ func (s *Server) routes() {
 
 }
 
-// HandleRefreshToken handles refresh token requests
+// HandleRefreshToken handles refresh token requests.
 // @Summary Handle refresh token validation, creation and creation of accessTokens too
 // @Description Handle refresh token validation, creation and creation of accessTokens too
 // @Tags refresh-token
@@ -239,28 +232,7 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 	}
 }
 
-// handleFetchUserInfo handles the fetching of user info from the id
-// the request with the following format:
-// Sends a JSOn payload containing the user info to the client with the following format.
-// Response:
-//   - email: string
-//   - name: string
-//   - avatar: string
-//
-// handleFetchUserInfo godoc
-//
-//	@Summary		Fetch user info from id
-//	@Description	Fetch user info from id
-//	@Tags			user-from-email
-//
-// @Param param path string true "ID of the user"
-//
-//	@Produce		json
-//	@Success		200		{object}	[]string
-//	@Failure		400		{string}    "Bad Request"
-//	@Failure		404		{string}    "Not Found"
-//	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/api/user/{param} [get].
+// handleFetchUserInfo handles fetching user information.
 func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -268,11 +240,10 @@ func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 		var user *user.User
 		var err error
 
-		// Assume it's an ID and fetch user by ID
 		// Extract user ID from the URL path
-		id := r.PathValue("param")
+		id := r.PathValue("id")
 		if id == "" {
-			http.Error(w, "Chat ID is required", http.StatusBadRequest)
+			http.Error(w, "User ID is required", http.StatusBadRequest)
 			return
 		}
 		userID, err := bson.ObjectIDFromHex(id)
@@ -345,21 +316,19 @@ func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
 	}
 }
 
-// handleIndex handles the index and status routes
+// handleStatus handles the index and status routes
 //
-// chatHandler godoc
-//
-//	@Summary		Status of the API
-//	@Description	Status of the API
-//	@Tags			status
-//	@Accept			json
-//	@Produce		json
-//	@Success		200		{object}	[]string
-//	@Failure		404		{string}    "Not Found"
-//	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/status [get].
+// @Summary		Status of the API
+// @Description	Status of the API
+// @Tags			status
+// @Accept			json
+// @Produce		json
+// @Success		200		{object}	[]string
+// @Failure		404		{string}    "Not Found"
+// @Failure		500		{string}    "Internal Server Error"
+// @Router			/status [get].
 func (s *Server) handleStatus() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
 			log.Printf("Failed to encode status response: %v", err)
@@ -540,18 +509,7 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 	}
 }
 
-// handleAgentInfo handles the ingestion of agent information
-// @Summary Ingest agent information
-// @Description Ingest agent information
-// @Tags agent-info
-// @Accept json
-// @Produce json
-// @Param agentInfo body agent.AgentInfo true "Agent Information"
-// @Success 201 {object} map[string]string "id of the inserted agent info"
-// @Failure 400 {string} string "Invalid request payload"
-// @Failure 401 {string} string "User not authenticated"
-// @Failure 500 {string} string "Failed to create agent"
-// @Router /api/agent-infos [post].
+// handleAgentInfo handles the ingestion of agent information.
 func (s *Server) handleAgentInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -597,19 +555,20 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 	}
 }
 
-// handleGetAgentInfos retrieves agents information
-// @Summary Ingest agent information
-// @Description Ingest agent information
+// handleAgentInfos retrieves agents information.
+// @Summary Get agent info by ID
+// @Description Retrieves agent information by ID.
 // @Tags agent-info
 // @Accept json
 // @Produce json
-// @Success 200 {object} []agent.AgentInfo "Successfully retrieved agent info"
+// @Success 200 {array} agent.AgentInfo "Successfully retrieved agent info"
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to retrieve agents info"
 // @Router /api/agents [get].
 func (s *Server) handleAgentInfos() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 
 		// Check if user info is already in the cookie
 		userID, _ := GetUserFromContext(r)
@@ -618,7 +577,7 @@ func (s *Server) handleAgentInfos() http.HandlerFunc {
 			return
 		}
 
-		agents, err := s.agentInfoService.GetAgents(r.Context(), userID)
+		agents, err := s.agentInfoService.GetAgents(context.Background(), userID)
 		if err != nil {
 			log.Printf("Failed to retrieve agents info: %v", err)
 			http.Error(w, "Failed to retrieve agents info", http.StatusInternalServerError)
@@ -629,7 +588,6 @@ func (s *Server) handleAgentInfos() http.HandlerFunc {
 			agents = []*agent.AgentInfo{}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(agents); err != nil {
 			log.Printf("Failed to encode agents response: %v", err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
@@ -638,18 +596,7 @@ func (s *Server) handleAgentInfos() http.HandlerFunc {
 	}
 }
 
-// handleGetAgentInfo retrieves agent information by id
-// @Summary Get agent info by ID
-// @Description Retrieves agent information by ID
-// @Tags agent-info
-// @Param id path string true "Agent ID"
-// @Produce json
-// @Success 200 {object} agent.AgentInfo "Successfully retrieved agent info"
-// @Failure 400 {string} string "Invalid ID format"
-// @Failure 401 {string} string "User not authenticated"
-// @Failure 404 {string} string "Agent info not found"
-// @Failure 500 {string} string "Failed to retrieve agent info"
-// @Router /api/agent-info/{id} [get].
+// @Param id path string true "Agent ID".
 func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -693,195 +640,7 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 	}
 }
 
-// handleStartChat starts a new chat session
-// @Summary Start a new chat session
-// @Description Starts a new chat session
-// @Tags chat
-// @Accept json
-// @Produce json
-// @Param agentID body string true "Agent ID"
-// @Success 201 {object} chat.Chat "Chat session started successfully"
-// @Failure 500 {string} string "Failed to start chat session"
-// @Router /api/chat [post].
-func (s *Server) handleStartChat() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		// Check if user info is already in the cookie
-		userID, _ := GetUserFromContext(r)
-		if userID == "" {
-			http.Error(w, "User not authenticated", http.StatusUnauthorized)
-			return
-		}
-
-		var chat chat.Chat
-		if err := json.NewDecoder(r.Body).Decode(&chat); err != nil {
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
-			return
-		}
-
-		// Validate required fields
-		if chat.AgentID == "" {
-			http.Error(w, "Agent ID is required", http.StatusBadRequest)
-			return
-		}
-
-		// validate whether agentId exists and is in the correct format
-		_, err := bson.ObjectIDFromHex(chat.AgentID)
-		if err != nil {
-			http.Error(w, "Invalid agent_id passed", http.StatusBadRequest)
-			return
-		}
-
-		insertResult, err := s.chatService.StartChat(r.Context(), &chat)
-		if err != nil {
-			http.Error(w, "Failed to start chat session", http.StatusInternalServerError)
-			return
-		}
-
-		if insertResult == nil {
-			http.Error(w, "agent_id doesn't exist", http.StatusBadRequest)
-			return
-		}
-
-		// Return the inserted ID in the response
-		response := map[string]string{
-			"id": insertResult.InsertedID.(bson.ObjectID).Hex(),
-		}
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode chat response: %v", err)
-			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-			return
-		}
-	}
-}
-
-// handleAddPromptResponse adds a prompt-response pair to an existing chat session
-// @Summary Add a prompt-response pair to a chat session
-// @Description Adds a prompt-response pair to an existing chat session
-// @Tags chat
-// @Accept json
-// @Produce json
-// @Param chatID path string true "Chat ID"
-// @Param promptResponse body chat.PromptResponse true "Prompt and Response"
-// @Success 200 {object} chat.Chat "Prompt-response pair added successfully"
-// @Failure 400 {string} string "Invalid request payload"
-// @Failure 404 {string} string "Chat session not found"
-// @Failure 500 {string} string "Failed to add prompt-response pair"
-// @Router /api/chat/{id} [put].
-func (s *Server) handleAddPromptResponse() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		// Check if user info is already in the cookie
-		userID, _ := GetUserFromContext(r)
-		if userID == "" {
-			http.Error(w, "User not authenticated", http.StatusUnauthorized)
-			return
-		}
-
-		id := r.PathValue("id")
-		chatID, err := bson.ObjectIDFromHex(id)
-		if err != nil {
-			http.Error(w, "Invalid chat ID format", http.StatusBadRequest)
-			return
-		}
-
-		var promptResponse chat.PromptResponse
-		if err := json.NewDecoder(r.Body).Decode(&promptResponse); err != nil {
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
-			return
-		}
-
-		if promptResponse.Prompt == "" || promptResponse.Type == "" {
-			http.Error(w, "Prompt and Type are required", http.StatusBadRequest)
-			return
-		}
-
-		chat, err := s.chatService.AddPromptResponse(r.Context(), chatID, promptResponse)
-		if err != nil {
-			if err == mongo.ErrNoDocuments {
-				http.Error(w, "Chat session not found", http.StatusNotFound)
-				return
-			}
-			http.Error(w, "Failed to add prompt-response pair", http.StatusInternalServerError)
-			return
-		}
-
-		if err := json.NewEncoder(w).Encode(chat); err != nil {
-			log.Printf("Failed to encode chat response: %v", err)
-			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-			return
-		}
-	}
-}
-
-// handleGetChatByID retrieves a chat session by ID
-// @Summary Get a chat session by ID
-// @Description Retrieves a chat session by ID
-// @Tags chat
-// @Produce json
-// @Param chatID path string true "Chat ID"
-// @Success 200 {object} chat.Chat "Successfully retrieved chat session"
-// @Failure 400 {string} string "Invalid chat ID format"
-// @Failure 404 {string} string "Chat session not found"
-// @Failure 500 {string} string "Failed to retrieve chat session"
-// @Router /api/chat/{id} [get].
-func (s *Server) handleGetChatByID() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		// Check if user info is already in the cookie
-		userID, _ := GetUserFromContext(r)
-		if userID == "" {
-			http.Error(w, "User not authenticated", http.StatusUnauthorized)
-			return
-		}
-
-		// Extract the ID from the URL path
-		id := r.PathValue("id")
-		if id == "" {
-			http.Error(w, "Chat ID is required", http.StatusBadRequest)
-			return
-		}
-
-		chatID, err := bson.ObjectIDFromHex(id)
-		if err != nil {
-			http.Error(w, "Invalid chat ID format", http.StatusBadRequest)
-			return
-		}
-
-		chat, err := s.chatService.GetChatByID(r.Context(), chatID)
-		if err != nil {
-			if err == mongo.ErrNoDocuments {
-				http.Error(w, "Chat session not found", http.StatusNotFound)
-				return
-			}
-			http.Error(w, "Failed to retrieve chat session", http.StatusInternalServerError)
-			return
-		}
-
-		if err := json.NewEncoder(w).Encode(chat); err != nil {
-			log.Printf("Failed to encode chat response: %v", err)
-			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-			return
-		}
-	}
-}
-
-// handleStartDiagnostic starts a new diagnostic session
-// @Summary Start diagnostic session
-// @Description Start a new diagnostic session for an agent
-// @Tags diagnostic
-// @Accept json
-// @Produce json
-// @Param request body StartDiagnosticRequest true "Start diagnostic request"
-// @Success 201 {object} diagnostic.DiagnosticSession
-// @Failure 400 {string} string "Invalid request format"
-// @Failure 401 {string} string "Unauthorized"
-// @Failure 500 {string} string "Internal server error"
-// @Router /api/diagnostic [post].
+// handleStartDiagnostic starts a new diagnostic session.
 func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -890,35 +649,31 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 		userID, _ := GetUserFromContext(r)
 		if userID == "" {
 			w.WriteHeader(http.StatusUnauthorized)
-			if err := json.NewEncoder(w).Encode(map[string]string{"error": "User not authenticated"}); err != nil {
-				log.Printf("Failed to encode error response: %v", err)
+			encodeErr := json.NewEncoder(w).Encode(map[string]string{"error": "User not authenticated"})
+			if encodeErr != nil {
+				log.Printf("Failed to encode error response: %v", encodeErr)
 				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-				return
 			}
 			return
 		}
 
-		var req struct {
-			AgentID string `json:"agent_id"`
-			Issue   string `json:"issue"`
-		}
-
-		if err := parseRequestJSON(r, &req); err != nil {
+		var req diagnostic.StartDiagnosticRequest
+		if parseErr := parseRequestJSON(r, &req); parseErr != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
-				log.Printf("Failed to encode error response: %v", err)
+			encodeErr := json.NewEncoder(w).Encode(map[string]string{"error": parseErr.Error()})
+			if encodeErr != nil {
+				log.Printf("Failed to encode error response: %v", encodeErr)
 				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-				return
 			}
 			return
 		}
 
 		if req.AgentID == "" || req.Issue == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(map[string]string{"error": "Agent ID and Issue are required"}); err != nil {
-				log.Printf("Failed to encode error response: %v", err)
+			encodeErr := json.NewEncoder(w).Encode(map[string]string{"error": "Agent ID and Issue are required"})
+			if encodeErr != nil {
+				log.Printf("Failed to encode error response: %v", encodeErr)
 				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-				return
 			}
 			return
 		}
@@ -926,27 +681,27 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 		session, err := s.diagnosticService.StartDiagnosticSession(r.Context(), req.AgentID, userID, req.Issue)
 		if err != nil {
 			statusCode := http.StatusInternalServerError
-			if strings.Contains(err.Error(), "invalid agent ID format") {
+			switch {
+			case strings.Contains(err.Error(), "invalid agent ID format"):
 				statusCode = http.StatusBadRequest
-			} else if strings.Contains(err.Error(), "agent not found") {
+			case strings.Contains(err.Error(), "agent not found"):
 				statusCode = http.StatusBadRequest
-			} else if strings.Contains(err.Error(), "agent does not belong to user") {
+			case strings.Contains(err.Error(), "agent does not belong to user"):
 				statusCode = http.StatusForbidden
 			}
 			w.WriteHeader(statusCode)
-			if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
-				log.Printf("Failed to encode error response: %v", err)
+			encodeErr := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			if encodeErr != nil {
+				log.Printf("Failed to encode error response: %v", encodeErr)
 				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-				return
 			}
 			return
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(session); err != nil {
-			log.Printf("Failed to encode session response: %v", err)
+		if encodeErr := json.NewEncoder(w).Encode(session); encodeErr != nil {
+			log.Printf("Failed to encode session response: %v", encodeErr)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-			return
 		}
 	}
 }
@@ -958,8 +713,9 @@ func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 // @Accept json
 // @Produce json
 // @Param id path string true "Session ID"
-// @Param diagnostic_output body []string true "Command results"
-// @Success 200 {object} diagnostic.DiagnosticSession
+// @Param request body diagnostic.ContinueDiagnosticRequest true "Continue diagnostic request"
+// @Success 201 {object} diagnostic.DiagnosticSession "When diagnosis is still in progress"
+// @Success 200 {object} diagnostic.DiagnosticSession "When diagnosis is completed"
 // @Failure 400 {string} string "Invalid request"
 // @Failure 404 {string} string "Session not found"
 // @Failure 500 {string} string "Internal server error"
@@ -980,11 +736,7 @@ func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 			return
 		}
 
-		var req struct {
-			DiagnosticOutput []string             `json:"diagnostic_output"`
-			SystemMetrics    *agent.SystemMetrics `json:"system_metrics,omitempty"`
-		}
-
+		var req diagnostic.ContinueDiagnosticRequest
 		if err := parseRequestJSON(r, &req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -1007,6 +759,13 @@ func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 			return
 		}
 
+		// Return 200 if the session is completed, 201 if still in progress
+		if session.Status == "completed" {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusCreated)
+		}
+
 		if err := json.NewEncoder(w).Encode(session); err != nil {
 			log.Printf("Failed to encode session response: %v", err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
@@ -1015,7 +774,7 @@ func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
 	}
 }
 
-// handleGetDiagnostic retrieves a diagnostic session
+// handleGetDiagnostic retrieves a diagnostic session.
 // @Summary Get diagnostic session
 // @Description Get details of a diagnostic session
 // @Tags diagnostic
@@ -1051,8 +810,8 @@ func (s *Server) handleGetDiagnostic() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(session); err != nil {
-			log.Printf("Failed to encode session response: %v", err)
+		if encodeErr := json.NewEncoder(w).Encode(session); encodeErr != nil {
+			log.Printf("Failed to encode session response: %v", encodeErr)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 			return
 		}

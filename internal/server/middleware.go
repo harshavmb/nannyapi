@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/harshavmb/nannyapi/internal/token"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/harshavmb/nannyapi/internal/token"
 )
 
 type contextKey string

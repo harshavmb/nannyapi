@@ -20,12 +20,11 @@ Each platform will have its own diagnostic command set and system-specific check
 graph TD
     A[Nanny Agent] -->|HTTP Request| B(API Gateway)
     B --> C{Authentication Middleware}
-    C -->|Authenticated| D[Chat Service]
     C -->|Authenticated| E[Agent Service]
-    D --> F[Diagnostic Service]
+    C -->|Authenticated| F[Diagnostic Service]
     F -->|AI Requests| G[DeepSeek Client]
-    D --> I[(MongoDB)]
-    E --> I
+    E --> I[(MongoDB)]
+    F --> I
 
     style A fill:#f9f,stroke:#333,stroke-width:2px
     style B fill:#bbf,stroke:#333,stroke-width:2px
@@ -45,17 +44,12 @@ graph TD
 - Token-based authentication
 - Session management
 
-### 3. Chat Service (`internal/chat/`)
-- Manages chat sessions
-- Processes user prompts
-- Coordinates with diagnostic service
-
-### 4. Diagnostic Service (`internal/diagnostic/`)
+### 3. Diagnostic Service (`internal/diagnostic/`)
 - Integrates with AI providers (DeepSeek)
 - Handles prompt preprocessing
 - Manages AI response processing
 
-### 5. Agent Service (`internal/agent/`)
+### 4. Agent Service (`internal/agent/`)
 - Manages agent information
 - Handles agent registration and updates
 - Tracks agent statistics
@@ -67,10 +61,8 @@ The system implements comprehensive logging for audit purposes:
 ```mermaid
 graph TD
     A[API Request] -->|Authentication| B[Auth Logger]
-    A -->|Chat| C[Chat Logger]
     A -->|Diagnostics| D[Diagnostic Logger]
     B --> E[Structured JSON Logs]
-    C --> E
     D --> E
     E -->|Archive| F[Log Storage]
     E -->|Analysis| G[Audit Reports]
@@ -82,17 +74,12 @@ graph TD
    - Token creation/deletion
    - Session management
 
-2. **Chat Interactions**
-   - Complete conversation history
-   - Timestamps and metadata
-   - AI service interactions
-
-3. **Diagnostic Sessions**
+2. **Diagnostic Sessions**
    - Command execution logs
    - System metric changes
    - Root cause analysis steps
 
-4. **System Changes**
+3. **System Changes**
    - Resource utilization changes
    - Configuration modifications
    - Service state changes
@@ -123,17 +110,18 @@ erDiagram
         datetime created_at
         datetime expires_at
     }
-    Chat ||--o{ Message : contains
-    Chat {
+    Diagnostic ||--o{ DiagnosticResult : contains
+    Diagnostic {
         ObjectID id
         string user_id
+        string issue
         datetime created_at
     }
-    Message {
+    DiagnosticResult {
         ObjectID id
-        string chat_id
-        string content
-        string role
+        string diagnostic_id
+        string command
+        string output
         datetime created_at
     }
 ```

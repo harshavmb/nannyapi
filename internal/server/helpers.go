@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/golang-jwt/jwt"
+
 	"github.com/harshavmb/nannyapi/internal/token"
 )
 
@@ -25,28 +26,17 @@ func parseRequestJSON(r *http.Request, target any) error {
 	contentType := r.Header.Get("Content-Type")
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return err
+		return fmt.Errorf("invalid Content-Type header: %v", err)
 	}
 	if mediaType != "application/json" {
-		return fmt.Errorf("expecting application/json Content-Type. Got %s", mediaType)
+		return fmt.Errorf("Content-Type header is not application/json: %v", mediaType)
 	}
 
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-
-	return dec.Decode(target)
-}
-
-func generateHistory(prompts, responses, types []string) []chat.PromptResponse {
-	history := make([]chat.PromptResponse, len(prompts))
-	for i := range prompts {
-		history[i] = chat.PromptResponse{
-			Prompt:   prompts[i],
-			Response: responses[i],
-			Type:     types[i],
-		}
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+		return fmt.Errorf("failed to decode request body: %v", err)
 	}
-	return history
+
+	return nil
 }
 
 // IsValidEmail checks if a string is a valid email address.
@@ -82,21 +72,35 @@ func IsValidEmail(email string) bool {
 }
 
 func generateRefreshToken(userID, jwtSecret string) (string, error) {
-	duration := 7 * 24 * time.Hour
-	refreshToken, err := token.GenerateJWT(userID, duration, "refresh", jwtSecret)
-	if err != nil {
-		return "", err
+	expirationTime := time.Now().Add(30 * 24 * time.Hour) // 30 days
+
+	claims := &token.Claims{
+		UserID: userID,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: expirationTime.Unix(),
+			IssuedAt:  time.Now().Unix(),
+			Issuer:    Issuer,
+		},
 	}
-	return refreshToken, nil
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(jwtSecret))
 }
 
 func generateAccessToken(userID, jwtSecret string) (string, error) {
-	duration := 1 * 15 * time.Minute // 15 minutes
-	accessToken, err := token.GenerateJWT(userID, duration, "access", jwtSecret)
-	if err != nil {
-		return "", err
+	expirationTime := time.Now().Add(15 * time.Minute) // 15 minutes
+
+	claims := &token.Claims{
+		UserID: userID,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: expirationTime.Unix(),
+			IssuedAt:  time.Now().Unix(),
+			Issuer:    Issuer,
+		},
 	}
-	return accessToken, nil
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(jwtSecret))
 }
 
 func (s *Server) validateRefreshToken(ctx context.Context, tokenString, jwtSecret string) (bool, *token.Claims, error) {
