@@ -1,0 +1,40 @@
+# Version control
+.git
+.gitignore
+
+# IDE specific files
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+bin/
+coverage.txt
+coverage.html
+
+# Dependencies
+vendor/
+
+# Test files
+*_test.go
+**/*_test.go
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Development configs
+.env
+.env.*
+.editorconfig
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Temporary files
+*.log
+*.tmp

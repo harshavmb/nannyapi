@@ -10,29 +10,29 @@ import (
 
 	"encoding/json"
 
-	"github.com/google/generative-ai-go/genai"
-	"github.com/harshavmb/nannyapi/internal/agent"
-	"github.com/harshavmb/nannyapi/internal/auth"
-	"github.com/harshavmb/nannyapi/internal/chat"
-	"github.com/harshavmb/nannyapi/internal/token"
-	"github.com/harshavmb/nannyapi/internal/user"
-	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/rs/cors"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/harshavmb/nannyapi/internal/agent"
+	"github.com/harshavmb/nannyapi/internal/auth"
+	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/diagnostic"
+	"github.com/harshavmb/nannyapi/internal/token"
+	"github.com/harshavmb/nannyapi/internal/user"
 )
 
-// Server represents the HTTP server
+// Server represents the HTTP server.
 type Server struct {
 	mux                 *http.ServeMux
-	geminiClient        *api.GeminiClient
 	githubAuth          *auth.GitHubAuth
 	userService         *user.UserService
 	agentInfoService    *agent.AgentInfoService
 	chatService         *chat.ChatService
 	tokenService        *token.TokenService
 	refreshTokenservice *token.RefreshTokenService
+	diagnosticService   *diagnostic.DiagnosticService
 	nannyAPIPort        string
 	nannySwaggerURL     string
 	gitHubRedirectURL   string
@@ -40,16 +40,20 @@ type Server struct {
 	nannyEncryptionKey  string
 }
 
-// startChat starts a chat session with the model using the given history.
-func (s *Server) startChat(hist []content) *genai.ChatSession {
-	model := s.geminiClient.Model()
-	cs := model.StartChat()
-	cs.History = transform(hist)
-	return cs
+// StartDiagnosticRequest represents a request to start a diagnostic session.
+type StartDiagnosticRequest struct {
+	ChatID     string            `json:"chat_id"`
+	Issue      string            `json:"issue"`
+	SystemInfo map[string]string `json:"system_info"`
 }
 
-// NewServer creates a new Server instance
-func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, jwtSecret, nannyEncryptionKey string) *Server {
+// ContinueDiagnosticRequest represents a request to continue a diagnostic session.
+type ContinueDiagnosticRequest struct {
+	Results []string `json:"results"`
+}
+
+// NewServer creates a new Server instance.
+func NewServer(githubAuth *auth.GitHubAuth, userService *user.UserService, agentInfoService *agent.AgentInfoService, chatService *chat.ChatService, tokenService *token.TokenService, refreshTokenService *token.RefreshTokenService, diagnosticService *diagnostic.DiagnosticService, jwtSecret, nannyEncryptionKey string) *Server {
 	mux := http.NewServeMux()
 
 	// override default nanny API port if NANNY_API_PORT is set
@@ -71,15 +75,14 @@ func NewServer(geminiClient *api.GeminiClient, githubAuth *auth.GitHubAuth, user
 		gitHubRedirectURL = fmt.Sprintf("http://localhost:%s/github/callback", nannyAPIPort) // Default GitHubCallback URL
 	}
 
-	server := &Server{mux: mux, geminiClient: geminiClient, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret, nannyEncryptionKey: nannyEncryptionKey}
+	server := &Server{mux: mux, githubAuth: githubAuth, userService: userService, agentInfoService: agentInfoService, chatService: chatService, tokenService: tokenService, refreshTokenservice: refreshTokenService, diagnosticService: diagnosticService, nannyAPIPort: nannyAPIPort, nannySwaggerURL: nannySwaggerURL, gitHubRedirectURL: gitHubRedirectURL, jwtSecret: jwtSecret, nannyEncryptionKey: nannyEncryptionKey}
 	server.routes()
 	return server
 }
 
-// routes defines the routes for the server
+// routes defines the routes for the server.
 func (s *Server) routes() {
 
-	s.mux.HandleFunc("POST /chat", s.chatHandler)
 	s.mux.HandleFunc("/status", s.handleStatus())
 	s.mux.HandleFunc("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL(s.nannySwaggerURL),
@@ -109,6 +112,14 @@ func (s *Server) routes() {
 	apiMux.HandleFunc("GET /api/chat/", s.handleGetChatByID())
 	apiMux.HandleFunc("GET /api/chat/{id}", s.handleGetChatByID())
 
+	// Diagnostic Endpoints
+	apiMux.HandleFunc("POST /api/diagnostic", s.handleStartDiagnostic())
+	apiMux.HandleFunc("POST /api/diagnostic/{id}/continue", s.handleContinueDiagnostic())
+	apiMux.HandleFunc("GET /api/diagnostic/{id}", s.handleGetDiagnostic())
+	apiMux.HandleFunc("GET /api/diagnostic/{id}/summary", s.handleGetDiagnosticSummary())
+	apiMux.HandleFunc("DELETE /api/diagnostic/{id}", s.handleDeleteDiagnostic())
+	apiMux.HandleFunc("GET /api/diagnostics", s.handleListDiagnostics())
+
 	// Create a new CORS handler
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:8081", "https://nannyai.dev", "https://nannyui.pages.dev"},
@@ -134,7 +145,6 @@ func (s *Server) routes() {
 
 	// Wrap the API mux with the CORS handler
 	s.mux.Handle("/api/", c.Handler(s.AuthMiddleware(apiMux)))
-	//s.mux.Handle("/", c.Handler(s.AuthMiddleware(http.HandlerFunc(s.handleIndex()))))
 
 }
 
@@ -149,7 +159,7 @@ func (s *Server) routes() {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to create refresh token"
-// @Router /api/refresh-token [post]
+// @Router /api/refresh-token [post].
 func (s *Server) handleRefreshToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Retrieve refresh token from cookies
@@ -223,7 +233,11 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 		// Write response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode refresh token response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -248,7 +262,7 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 //	@Failure		400		{string}    "Bad Request"
 //	@Failure		404		{string}    "Not Found"
 //	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/api/user/{param} [get]
+//	@Router			/api/user/{param} [get].
 func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -287,7 +301,11 @@ func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 
 		log.Printf("User info retreived for: %s", user.Email)
 
-		json.NewEncoder(w).Encode(user)
+		if err := json.NewEncoder(w).Encode(user); err != nil {
+			log.Printf("Failed to encode user response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -309,7 +327,7 @@ func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 //	@Failure		400		{string}    "Bad Request"
 //	@Failure		404		{string}    "Not Found"
 //	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/api/user-auth-token [get]
+//	@Router			/api/user-auth-token [get].
 func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -321,79 +339,12 @@ func (s *Server) handleFetchUserInfoFromToken() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(userID)
-	}
-}
-
-// chatHandler returns the complete response of the model to the client. Expects a JSON payload in
-// the request with the following format:
-// Request:
-//   - chat: string
-//   - history: []
-//
-// Sends a JSON payload containing the model response to the client with the following format.
-// Response:
-//   - text: string
-//
-// chatHandler godoc
-//
-//	@Summary		Chat with the model
-//	@Description	Chat with the model
-//	@Tags			chat
-//	@Accept			json
-//	@Produce		json
-//	@Param			chat	body		chatRequest	true	"Chat request"
-//	@Success		200		{object}	[]string
-//	@Failure		400		{string}    "Bad Request"
-//	@Failure		404		{string}    "Not Found"
-//	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/chat [post]
-func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
-	cr := &chatRequest{}
-	if err := parseRequestJSON(r, cr); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	cs := s.startChat(cr.History)
-
-	if len(cr.History) == 0 {
-		// 1. Initial Prompt (Request from User/Agent):
-		initialPrompt := fmt.Sprintf("Run a list investigative Linux commands to diagnose %s on a server. If binaries are from sysstat, collect metrics for 5 seconds every 1 sec interval (only if required by the input prompt)", cr.Chat)
-		res, err := cs.SendMessage(s.geminiClient.Ctx, genai.Text(initialPrompt))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return // Return early to avoid sending a response
-		}
-
-		// ... (Extract commands from Gemini's response as before) ...
-		commands, err := extractCommands(res) // Helper function to extract commands
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(userID); err != nil {
+			log.Printf("Failed to encode user ID response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 			return
 		}
-
-		// 2. Send commands to agent (and return to the agent)
-		sendCommandsToAgent(w, commands) // Helper to send commands to agent
-	} else {
-		// 3. Agent's Response (Commands Output):
-		//agentResponse := getAgentResponse(r) // Helper to read JSON from agent
-
-		// 4. Construct a *new* prompt for Gemini *including* the agent's output
-		feedbackPrompt := fmt.Sprintf("Here are the results of the commands I ran: %s", cr.Chat)
-
-		// 5. Send feedback prompt to Gemini
-		feedbackRes, err := cs.SendMessage(s.geminiClient.Ctx, genai.Text(feedbackPrompt))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// 6. Process Gemini's *feedback* response and send it back to the client
-		geminiFeedback := extractGeminiFeedback(feedbackRes) // Helper function
-		sendGeminiFeedbackToClient(w, geminiFeedback)        // Helper to send the feedback
 	}
-
 }
 
 // handleIndex handles the index and status routes
@@ -408,20 +359,24 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 //	@Success		200		{object}	[]string
 //	@Failure		404		{string}    "Not Found"
 //	@Failure		500		{string}    "Internal Server Error"
-//	@Router			/status [get]
+//	@Router			/status [get].
 func (s *Server) handleStatus() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+			log.Printf("Failed to encode status response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
-// ServeHTTP implements the http.Handler interface
+// ServeHTTP implements the http.Handler interface.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// handleCreateAuthToken creates auth token (aka API key) for the authenticated user.
+// handleCreateAuthToken creates auth token (aka API key) for the authenticated user
 // @Summary Creates auth token (aka API key) for the authenticated user
 // @Description Creates auth token (aka API key) for the authenticated user.
 // @Tags auth-token
@@ -430,7 +385,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to create API key"
-// @Router /api/auth-token [post]
+// @Router /api/auth-token [post].
 func (s *Server) handleCreateAuthToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -467,19 +422,23 @@ func (s *Server) handleCreateAuthToken() http.HandlerFunc {
 		responseToken.Token = decryptedToken
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(responseToken)
+		if err := json.NewEncoder(w).Encode(responseToken); err != nil {
+			log.Printf("Failed to encode token response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
-// handleGetAuthTokens retrieves all auth tokens for the authenticated user.
+// handleGetAuthTokens retrieves all auth tokens for the authenticated user
 // @Summary Get all auth tokens
-// @Description Retrieves all auth tokens for the authenticated user.
+// @Description Retrieves all auth tokens for the authenticated user
 // @Tags auth-tokens
 // @Produce json
 // @Success 200 {array} token.Token "Successfully retrieved auth tokens"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to retrieve auth tokens"
-// @Router /api/auth-tokens [get]
+// @Router /api/auth-tokens [get].
 func (s *Server) handleGetAuthTokens() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -518,7 +477,11 @@ func (s *Server) handleGetAuthTokens() http.HandlerFunc {
 			unencryptedTokens = append(unencryptedTokens, &newToken)
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(unencryptedTokens)
+		if err := json.NewEncoder(w).Encode(unencryptedTokens); err != nil {
+			log.Printf("Failed to encode tokens response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -531,7 +494,7 @@ func (s *Server) handleGetAuthTokens() http.HandlerFunc {
 // @Success 200 {object} map[string]string "Auth token deleted successfully"
 // @Failure 400 {string} string "Invalid token ID format or Token ID is required"
 // @Failure 500 {string} string "Failed to delete auth token"
-// @Router /api/auth-token/{id} [delete]
+// @Router /api/auth-token/{id} [delete].
 func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -571,7 +534,11 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 
 		// Return success response
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"message": "Auth token deleted successfully"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"message": "Auth token deleted successfully"}); err != nil {
+			log.Printf("Failed to encode delete response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -586,7 +553,7 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to create agent"
-// @Router /api/agent-infos [post]
+// @Router /api/agent-infos [post].
 func (s *Server) handleAgentInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -624,7 +591,11 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode agent info response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -638,7 +609,7 @@ func (s *Server) handleAgentInfo() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 500 {string} string "Failed to retrieve agents info"
-// @Router /api/agents [get]
+// @Router /api/agents [get].
 func (s *Server) handleAgentInfos() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -661,7 +632,11 @@ func (s *Server) handleAgentInfos() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(agents)
+		if err := json.NewEncoder(w).Encode(agents); err != nil {
+			log.Printf("Failed to encode agents response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -676,7 +651,7 @@ func (s *Server) handleAgentInfos() http.HandlerFunc {
 // @Failure 401 {string} string "User not authenticated"
 // @Failure 404 {string} string "Agent info not found"
 // @Failure 500 {string} string "Failed to retrieve agent info"
-// @Router /api/agent-info/{id} [get]
+// @Router /api/agent-info/{id} [get].
 func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -712,7 +687,11 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(agentInfo)
+		if err := json.NewEncoder(w).Encode(agentInfo); err != nil {
+			log.Printf("Failed to encode agent info response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -725,7 +704,7 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 // @Param agentID body string true "Agent ID"
 // @Success 201 {object} chat.Chat "Chat session started successfully"
 // @Failure 500 {string} string "Failed to start chat session"
-// @Router /api/chat [post]
+// @Router /api/chat [post].
 func (s *Server) handleStartChat() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -772,7 +751,11 @@ func (s *Server) handleStartChat() http.HandlerFunc {
 			"id": insertResult.InsertedID.(bson.ObjectID).Hex(),
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode chat response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -788,7 +771,7 @@ func (s *Server) handleStartChat() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid request payload"
 // @Failure 404 {string} string "Chat session not found"
 // @Failure 500 {string} string "Failed to add prompt-response pair"
-// @Router /api/chat/{id} [put]
+// @Router /api/chat/{id} [put].
 func (s *Server) handleAddPromptResponse() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -828,7 +811,11 @@ func (s *Server) handleAddPromptResponse() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(chat)
+		if err := json.NewEncoder(w).Encode(chat); err != nil {
+			log.Printf("Failed to encode chat response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -842,7 +829,7 @@ func (s *Server) handleAddPromptResponse() http.HandlerFunc {
 // @Failure 400 {string} string "Invalid chat ID format"
 // @Failure 404 {string} string "Chat session not found"
 // @Failure 500 {string} string "Failed to retrieve chat session"
-// @Router /api/chat/{id} [get]
+// @Router /api/chat/{id} [get].
 func (s *Server) handleGetChatByID() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -877,6 +864,332 @@ func (s *Server) handleGetChatByID() http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(chat)
+		if err := json.NewEncoder(w).Encode(chat); err != nil {
+			log.Printf("Failed to encode chat response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+// handleStartDiagnostic starts a new diagnostic session
+// @Summary Start diagnostic session
+// @Description Start a new diagnostic session for an agent
+// @Tags diagnostic
+// @Accept json
+// @Produce json
+// @Param request body StartDiagnosticRequest true "Start diagnostic request"
+// @Success 201 {object} diagnostic.DiagnosticSession
+// @Failure 400 {string} string "Invalid request format"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic [post].
+func (s *Server) handleStartDiagnostic() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user is authenticated
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": "User not authenticated"}); err != nil {
+				log.Printf("Failed to encode error response: %v", err)
+				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+				return
+			}
+			return
+		}
+
+		var req struct {
+			AgentID string `json:"agent_id"`
+			Issue   string `json:"issue"`
+		}
+
+		if err := parseRequestJSON(r, &req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+				log.Printf("Failed to encode error response: %v", err)
+				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+				return
+			}
+			return
+		}
+
+		if req.AgentID == "" || req.Issue == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": "Agent ID and Issue are required"}); err != nil {
+				log.Printf("Failed to encode error response: %v", err)
+				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+				return
+			}
+			return
+		}
+
+		session, err := s.diagnosticService.StartDiagnosticSession(r.Context(), req.AgentID, userID, req.Issue)
+		if err != nil {
+			statusCode := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "invalid agent ID format") {
+				statusCode = http.StatusBadRequest
+			} else if strings.Contains(err.Error(), "agent not found") {
+				statusCode = http.StatusBadRequest
+			} else if strings.Contains(err.Error(), "agent does not belong to user") {
+				statusCode = http.StatusForbidden
+			}
+			w.WriteHeader(statusCode)
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
+				log.Printf("Failed to encode error response: %v", err)
+				http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+				return
+			}
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(session); err != nil {
+			log.Printf("Failed to encode session response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+// handleContinueDiagnostic continues an existing diagnostic session
+// @Summary Continue a diagnostic session
+// @Description Continue an existing Linux system diagnostic session
+// @Tags diagnostic
+// @Accept json
+// @Produce json
+// @Param id path string true "Session ID"
+// @Param diagnostic_output body []string true "Command results"
+// @Success 200 {object} diagnostic.DiagnosticSession
+// @Failure 400 {string} string "Invalid request"
+// @Failure 404 {string} string "Session not found"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic/{id}/continue [post].
+func (s *Server) handleContinueDiagnostic() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate session ID format
+		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
+			http.Error(w, "invalid session ID format", http.StatusBadRequest)
+			return
+		}
+
+		var req struct {
+			DiagnosticOutput []string             `json:"diagnostic_output"`
+			SystemMetrics    *agent.SystemMetrics `json:"system_metrics,omitempty"`
+		}
+
+		if err := parseRequestJSON(r, &req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		session, err := s.diagnosticService.ContinueDiagnosticSession(r.Context(), sessionID, req.DiagnosticOutput)
+		if err != nil {
+			statusCode := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "invalid session ID format") {
+				statusCode = http.StatusBadRequest
+			} else if strings.Contains(err.Error(), "session not found") {
+				statusCode = http.StatusNotFound
+			}
+			http.Error(w, err.Error(), statusCode)
+			return
+		}
+
+		if session == nil {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+
+		if err := json.NewEncoder(w).Encode(session); err != nil {
+			log.Printf("Failed to encode session response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+// handleGetDiagnostic retrieves a diagnostic session
+// @Summary Get diagnostic session
+// @Description Get details of a diagnostic session
+// @Tags diagnostic
+// @Produce json
+// @Param id path string true "Session ID"
+// @Success 200 {object} diagnostic.DiagnosticSession
+// @Failure 400 {string} string "Invalid session ID format"
+// @Failure 404 {string} string "Session not found"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic/{id} [get].
+func (s *Server) handleGetDiagnostic() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate session ID format
+		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
+			http.Error(w, "invalid session ID format", http.StatusBadRequest)
+			return
+		}
+
+		session, err := s.diagnosticService.GetDiagnosticSession(r.Context(), sessionID)
+		if err != nil {
+			statusCode := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "session not found") {
+				statusCode = http.StatusNotFound
+			}
+			http.Error(w, err.Error(), statusCode)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(session); err != nil {
+			log.Printf("Failed to encode session response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+// handleGetDiagnosticSummary retrieves a diagnostic session summary
+// @Summary Get diagnostic summary
+// @Description Get a summary of the diagnostic session
+// @Tags diagnostic
+// @Produce json
+// @Param id path string true "Session ID"
+// @Success 200 {string} string "Diagnostic summary"
+// @Failure 404 {string} string "Session not found"
+// @Failure 400 {string} string "Invalid session ID format"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic/{id}/summary [get].
+func (s *Server) handleGetDiagnosticSummary() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate session ID format
+		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
+			http.Error(w, "invalid session ID format", http.StatusBadRequest)
+			return
+		}
+
+		summary, err := s.diagnosticService.GetDiagnosticSummary(r.Context(), sessionID)
+		if err != nil {
+			statusCode := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "session not found") {
+				statusCode = http.StatusNotFound
+			}
+			http.Error(w, err.Error(), statusCode)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"summary": summary}); err != nil {
+			log.Printf("Failed to encode summary response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+// handleDeleteDiagnostic deletes a diagnostic session
+// @Summary Delete a diagnostic session
+// @Description Delete a diagnostic session and its associated data
+// @Tags diagnostic
+// @Produce json
+// @Param id path string true "Session ID"
+// @Success 200 {string} string "Session deleted successfully"
+// @Failure 400 {string} string "Invalid session ID"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 403 {string} string "User not authorized"
+// @Failure 404 {string} string "Session not found"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic/{id} [delete].
+func (s *Server) handleDeleteDiagnostic() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if user is authenticated
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		sessionID := r.PathValue("id")
+		if sessionID == "" {
+			http.Error(w, "Session ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate session ID format
+		if _, err := bson.ObjectIDFromHex(sessionID); err != nil {
+			http.Error(w, "Invalid session ID format", http.StatusBadRequest)
+			return
+		}
+
+		err := s.diagnosticService.DeleteSession(r.Context(), sessionID, userID)
+		if err != nil {
+			statusCode := http.StatusInternalServerError
+			if err.Error() == "session not found" {
+				statusCode = http.StatusNotFound
+			} else if err.Error() == "user does not own this session" {
+				statusCode = http.StatusForbidden
+			}
+			http.Error(w, err.Error(), statusCode)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(map[string]string{"message": "Session deleted successfully"}); err != nil {
+			log.Printf("Failed to encode delete response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+// handleListDiagnostics lists diagnostic sessions for the authenticated user
+// @Summary List diagnostic sessions
+// @Description List all diagnostic sessions for the authenticated user
+// @Tags diagnostic
+// @Produce json
+// @Success 200 {array} diagnostic.DiagnosticSession
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostics [get].
+func (s *Server) handleListDiagnostics() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if user is authenticated
+		userID, _ := GetUserFromContext(r)
+		if userID == "" {
+			http.Error(w, "User not authenticated", http.StatusUnauthorized)
+			return
+		}
+
+		sessions, err := s.diagnosticService.ListUserSessions(r.Context(), userID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to list sessions: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if err := json.NewEncoder(w).Encode(sessions); err != nil {
+			log.Printf("Failed to encode sessions response: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }

@@ -1,22 +1,23 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
+
+	"github.com/rs/cors"
 
 	"github.com/harshavmb/nannyapi/docs"
 	"github.com/harshavmb/nannyapi/internal/agent"
 	"github.com/harshavmb/nannyapi/internal/auth"
 	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/diagnostic"
 	"github.com/harshavmb/nannyapi/internal/server"
 	"github.com/harshavmb/nannyapi/internal/token"
 	"github.com/harshavmb/nannyapi/internal/user"
-	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/harshavmb/nannyapi/pkg/database"
-	"github.com/rs/cors"
 )
 
 const defaultPort = "8080"
@@ -36,20 +37,7 @@ func main() {
 	docs.SwaggerInfo.Host = "nannyai.dev"
 	docs.SwaggerInfo.BasePath = "/api/v1"
 
-	ctx := context.Background()
-
-	var geminiClient *api.GeminiClient
 	var err error
-
-	// Check if Gemini API key is present
-	if os.Getenv("GEMINI_API_KEY") != "" {
-		// Initialize Gemini API client
-		geminiClient, err = api.NewGeminiClient(ctx)
-		if err != nil {
-			log.Fatalf("could not create Gemini client %v", err)
-		}
-		defer geminiClient.Close()
-	}
 
 	// Initialize MongoDB client
 	mongoDB, err := database.InitDB()
@@ -81,17 +69,20 @@ func main() {
 		port = os.Getenv("NANNY_API_PORT")
 	}
 
-	// Initialize User Repository and Service
+	// Initialize repositories and services
 	userRepo := user.NewUserRepository(mongoDB)
 	agentInfoRepo := agent.NewAgentInfoRepository(mongoDB)
 	tokenRepo := token.NewTokenRepository(mongoDB)
 	refreshTokenRepo := token.NewRefreshTokenRepository(mongoDB)
 	chatRepo := chat.NewChatRepository(mongoDB)
+	diagnosticRepo := diagnostic.NewDiagnosticRepository(mongoDB)
+
 	userService := user.NewUserService(userRepo)
 	tokenService := token.NewTokenService(tokenRepo)
 	refreshTokenService := token.NewRefreshTokenService(refreshTokenRepo)
 	agentService := agent.NewAgentInfoService(agentInfoRepo)
 	chatService := chat.NewChatService(chatRepo, agentService)
+	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepo, agentService)
 
 	// Initialize GitHub OAuth
 	githubClientID := os.Getenv("GH_CLIENT_ID")
@@ -103,8 +94,18 @@ func main() {
 	}
 	githubAuth := auth.NewGitHubAuth(githubClientID, githubClientSecret, githubRedirectURL, userService, refreshTokenService, nannyEncryptionKey, jwtSecret, frontendHost)
 
-	// Create server with Gemini client
-	srv := server.NewServer(geminiClient, githubAuth, userService, agentService, chatService, tokenService, refreshTokenService, jwtSecret, nannyEncryptionKey)
+	// Create server with AI, database client
+	srv := server.NewServer(
+		githubAuth,
+		userService,
+		agentService,
+		chatService,
+		tokenService,
+		refreshTokenService,
+		diagnosticService,
+		jwtSecret,
+		nannyEncryptionKey,
+	)
 
 	// Add CORS middleware handler.
 	c := cors.New(cors.Options{
@@ -115,8 +116,19 @@ func main() {
 	})
 	handler := c.Handler(srv)
 
+	// Create a server with timeouts
+	httpServer := &http.Server{
+		Addr:    ":" + port,
+		Handler: handler,
+		// G114 (CWE-676): Use of net/http serve function that has no support for setting timeouts (Confidence: HIGH, Severity: MEDIUM).
+		ReadTimeout:       5 * time.Second,   // Maximum duration for reading the entire request, including the body.
+		WriteTimeout:      10 * time.Second,  // Maximum duration for writing the response.
+		IdleTimeout:       120 * time.Second, // Maximum amount of time to wait for the next request when keep-alives are enabled.
+		ReadHeaderTimeout: 3 * time.Second,
+	}
+
 	log.Printf("Starting server on port %s...", port)
-	if err := http.ListenAndServe(":"+port, handler); err != nil {
+	if err := httpServer.ListenAndServe(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

@@ -30,7 +30,7 @@ func NewRefreshTokenService(refreshTokenRepo *RefreshTokenRepository) *RefreshTo
 	}
 }
 
-// CreateToken creates a static token
+// CreateToken creates a static token.
 func (s *TokenService) CreateToken(ctx context.Context, token Token, encryptionKey string) (*Token, error) {
 	// Hash the token
 	hashedToken := HashToken(token.Token)
@@ -51,7 +51,7 @@ func (s *TokenService) CreateToken(ctx context.Context, token Token, encryptionK
 	return s.tokenRepo.CreateToken(ctx, token)
 }
 
-// GetTokenByHashedToken retrieves a static token by hashed token
+// GetTokenByHashedToken retrieves a static token by hashed token.
 func (s *TokenService) GetTokenByHashedToken(ctx context.Context, hashedToken string) (*Token, error) {
 	token, err := s.tokenRepo.GetTokenByHashedToken(ctx, hashedToken)
 
@@ -71,7 +71,7 @@ func (s *TokenService) GetTokenByHashedToken(ctx context.Context, hashedToken st
 	return token, nil
 }
 
-// DeleteToken deletes a static token
+// DeleteToken deletes a static token.
 func (s *TokenService) DeleteToken(ctx context.Context, tokenID bson.ObjectID) error {
 	// this is necessary to confirm token is deleted
 	// and to return the correct response to client
@@ -97,7 +97,7 @@ func (s *TokenService) DeleteToken(ctx context.Context, tokenID bson.ObjectID) e
 	return nil
 }
 
-// GetAllTokens gets all static tokens by a user
+// GetAllTokens gets all static tokens by a user.
 func (s *TokenService) GetAllTokens(context context.Context, userID string) ([]*Token, error) {
 	tokens, err := s.tokenRepo.GetTokensByUser(context, userID)
 	if err != nil {
@@ -118,7 +118,7 @@ func (s *TokenService) GetAllTokens(context context.Context, userID string) ([]*
 	return nil, nil
 }
 
-// CreateRefreshToken creates a refresh token
+// CreateRefreshToken creates a refresh token.
 func (s *RefreshTokenService) CreateRefreshToken(ctx context.Context, token RefreshToken, encryptionKey string) (*RefreshToken, error) {
 	// Hash the token
 	hashedToken := HashToken(token.Token)
@@ -140,7 +140,7 @@ func (s *RefreshTokenService) CreateRefreshToken(ctx context.Context, token Refr
 }
 
 // UpdateRefreshToken updates a refresh token
-// NOT TO BE USED by http handlers, only for testing
+// NOT TO BE USED by http handlers, only for testing.
 func (s *RefreshTokenService) UpdateRefreshToken(ctx context.Context, token RefreshToken, encryptionKey string) error {
 	// Hash the token
 	hashedToken := HashToken(token.Token)
@@ -159,7 +159,7 @@ func (s *RefreshTokenService) UpdateRefreshToken(ctx context.Context, token Refr
 	return s.refreshTokenRepo.UpdateRefreshToken(ctx, &token)
 }
 
-// GetRefreshTokenByHashedToken retrieves a refresh token by hashed token
+// GetRefreshTokenByHashedToken retrieves a refresh token by hashed token.
 func (s *RefreshTokenService) GetRefreshTokenByHashedToken(ctx context.Context, hashedToken string) (*RefreshToken, error) {
 	token, err := s.refreshTokenRepo.GetRefreshToken(ctx, hashedToken)
 
@@ -179,7 +179,7 @@ func (s *RefreshTokenService) GetRefreshTokenByHashedToken(ctx context.Context, 
 	return token, nil
 }
 
-// GetAllRefreshTokens gets all static tokens by a user
+// GetAllRefreshTokens gets all static tokens by a user.
 func (s *RefreshTokenService) GetAllRefreshTokens(context context.Context, userID string) ([]*RefreshToken, error) {
 	tokens, err := s.refreshTokenRepo.GetRefreshTokensByUser(context, userID)
 	if err != nil {
@@ -200,7 +200,7 @@ func (s *RefreshTokenService) GetAllRefreshTokens(context context.Context, userI
 	return nil, nil
 }
 
-// DeleteRefreshToken deletes a static token
+// DeleteRefreshToken deletes a static token.
 func (s *RefreshTokenService) DeleteRefreshToken(ctx context.Context, hashedToken string) error {
 	err := s.refreshTokenRepo.DeleteRefreshToken(ctx, hashedToken)
 
@@ -212,7 +212,7 @@ func (s *RefreshTokenService) DeleteRefreshToken(ctx context.Context, hashedToke
 	return nil
 }
 
-// RevokeAllRefreshTokens gets all static tokens by a user
+// RevokeAllRefreshTokens gets all static tokens by a user.
 func (s *RefreshTokenService) RevokeAllRefreshTokens(context context.Context, userID string) error {
 	tokens, err := s.refreshTokenRepo.GetRefreshTokensByUser(context, userID)
 	if err != nil {

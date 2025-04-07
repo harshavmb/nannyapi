@@ -16,7 +16,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v2
       with:
-        go-version: 1.22
+        go-version: 1.24
 
     - name: Build binary
       run: |
@@ -28,7 +28,7 @@ jobs:
         name: nannyapi
         path: |
           nannyapi
-  
+
   deploy:
     runs-on: [self-hosted, linux, ARM64]
     needs: build
@@ -39,11 +39,11 @@ jobs:
       with:
         name: nannyapi
         path: nannyapi
-        
+
     - name: Clean work directory except env.conf
       run: |
         find /opt/nannyapi-workdir/ -mindepth 1 -not -name 'env.conf' -delete
-    
+
     - name: Deploy binary and static files
       run: |
         mv /home/ubuntu/actions-runner/_work/nannyapi/nannyapi/nannyapi/* /opt/nannyapi-workdir/

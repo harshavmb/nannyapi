@@ -14,22 +14,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/harshavmb/nannyapi/internal/agent"
-	"github.com/harshavmb/nannyapi/internal/auth"
-	"github.com/harshavmb/nannyapi/internal/chat"
-	"github.com/harshavmb/nannyapi/internal/token"
-	"github.com/harshavmb/nannyapi/internal/user"
-	"github.com/harshavmb/nannyapi/pkg/api"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/harshavmb/nannyapi/internal/agent"
+	"github.com/harshavmb/nannyapi/internal/auth"
+	"github.com/harshavmb/nannyapi/internal/chat"
+	"github.com/harshavmb/nannyapi/internal/diagnostic"
+	"github.com/harshavmb/nannyapi/internal/token"
+	"github.com/harshavmb/nannyapi/internal/user"
 )
 
 const (
 	testDBName         = "test_db"
 	testCollectionName = "servers"
-	jwtSecret          = "d2a8b6aad8fb7d736508a520e2d53460054d21b14c1a8be86ec61e654ee807e6d47e167628bdeb59d7da25ac4de4ab1cbc161b2a335924b89e22fdac3bc44511e9fa896031b3154fd7365fe01c539ef5681ba70a65619eae8c7c14b832ea989d779d828a4e95e63181ae70ad0d855a40477144cc892097e0b0c0abfd5a26ce5f8bc0159bf44171a6dcd295aa810c4759ae0a0bc0f13b9f5872fd048ab9daa94c64d5e999dc7ea928f5a87731b468c25f2a67a6180f8f99bd9d38c706f9ca77f74e0929b5abec65c3b26d641f57a6c683a0770880748ebc5804ada5179a0252228b1a328898cae4a0d987767889251eda344cb45fd4725099de8f0947328a6166" //just for testing not used anywhere
+	jwtSecret          = "d2a8b6aad8fb7d736508a520e2d53460054d21b14c1a8be86ec61e654ee807e6d47e167628bdeb59d7da25ac4de4ab1cbc161b2a335924b89e22fdac3bc44511e9fa896031b3154fd7365fe01c539ef5681ba70a65619eae8c7c14b832ea989d779d828a4e95e63181ae70ad0d855a40477144cc892097e0b0c0abfd5a26ce5f8bc0159bf44171a6dcd295aa810c4759ae0a0bc0f13b9f5872fd048ab9daa94c64d5e999dc7ea928f5a87731b468c25f2a67a6180f8f99bd9d38c706f9ca77f74e0929b5abec65c3b26d641f57a6c683a0770880748ebc5804ada5179a0252228b1a328898cae4a0d987767889251eda344cb45fd4725099de8f0947328a6166" // just for testing not used anywhere
 	encryptionKey      = "T3byOVRJGt/25v6c6GC3wWkNKtL1WPuW5yVjCEnaHA8="                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     // Base64 encoded 32-byte key
 )
 
@@ -56,16 +57,12 @@ func setupTestDB(t *testing.T) (*mongo.Client, func()) {
 	return client, cleanup
 }
 
-func setupServer(t *testing.T) (*Server, func(), string, string) {
-	// Mock Gemini Client
-	mockGeminiClient := &api.GeminiClient{}
-
+func setupServer(t *testing.T) (*Server, func(), token.Token, string) {
 	// Mock GitHub Auth
 	mockGitHubAuth := &auth.GitHubAuth{}
 
 	// Connect to test database
 	client, cleanup := setupTestDB(t)
-	//defer cleanup()
 
 	// Create a new Repository objects
 	userRepository := user.NewUserRepository(client.Database(testDBName))
@@ -73,6 +70,7 @@ func setupServer(t *testing.T) (*Server, func(), string, string) {
 	refreshTokenRepository := token.NewRefreshTokenRepository(client.Database(testDBName))
 	agentInfoRepository := agent.NewAgentInfoRepository(client.Database(testDBName))
 	ChatRepository := chat.NewChatRepository(client.Database(testDBName))
+	diagnosticRepository := diagnostic.NewDiagnosticRepository(client.Database(testDBName))
 
 	// Mock Services
 	mockUserService := user.NewUserService(userRepository)
@@ -80,9 +78,10 @@ func setupServer(t *testing.T) (*Server, func(), string, string) {
 	chatService := chat.NewChatService(ChatRepository, agentInfoservice)
 	mockTokenService := token.NewTokenService(tokenRepository)
 	mockRefreshTokenService := token.NewRefreshTokenService(refreshTokenRepository)
+	diagnosticService := diagnostic.NewDiagnosticService(os.Getenv("DEEPSEEK_API_KEY"), diagnosticRepository, agentInfoservice)
 
 	// Create a new server instance
-	server := NewServer(mockGeminiClient, mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, jwtSecret, encryptionKey)
+	server := NewServer(mockGitHubAuth, mockUserService, agentInfoservice, chatService, mockTokenService, mockRefreshTokenService, diagnosticService, jwtSecret, encryptionKey)
 
 	// Create a valid auth token for the test user
 	testUser := &user.User{
@@ -104,8 +103,17 @@ func setupServer(t *testing.T) (*Server, func(), string, string) {
 		t.Fatalf("Failed to create user: %v", err)
 	}
 
+	user, err := server.userService.GetUserByEmail(context.Background(), testUser.Email)
+	if err != nil {
+		log.Fatalf("error while fetching user: %v", err)
+	}
+
+	if user == nil {
+		log.Fatalf("user not found")
+	}
+
 	staticToken := token.Token{
-		UserID: token.GenerateRandomString(6),
+		UserID: user.ID.Hex(),
 		Token:  token.GenerateRandomString(10),
 	}
 
@@ -119,7 +127,7 @@ func setupServer(t *testing.T) (*Server, func(), string, string) {
 		t.Fatalf("Failed to create access token: %v", err)
 	}
 
-	return server, cleanup, staticToken.Token, accessToken
+	return server, cleanup, staticToken, accessToken
 }
 
 func TestHandleDeleteAuthToken(t *testing.T) {
@@ -180,7 +188,7 @@ func TestHandleDeleteAuthToken(t *testing.T) {
 		}
 
 		// Delete the token that doesn't exist
-		req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/%s", "/api/auth-token", bson.NewObjectID().Hex()), nil) //sending an incorrect one
+		req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/%s", "/api/auth-token", bson.NewObjectID().Hex()), nil) // sending an incorrect one
 		if err != nil {
 			t.Fatalf("Could not delete token: %v", err)
 		}
@@ -298,7 +306,7 @@ func TestAuthMiddleware_BothStaticAndAccessTokens(t *testing.T) {
 
 	// set both Access token and API keys
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accesstoken))
-	req.Header.Set("X-NANNYAPI-Key", apiKey)
+	req.Header.Set("X-NANNYAPI-Key", apiKey.Token)
 
 	// Create a test recorder
 	recorder := httptest.NewRecorder()
@@ -486,7 +494,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			UserID:        "123456",
+			UserID:        validToken.UserID,
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -507,7 +515,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Set a valid Authorization header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		// Create a test recorder
 		recorder := httptest.NewRecorder()
@@ -521,7 +529,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Check the response body
-		expected := fmt.Sprintf(`{"id":"%s","user_id":"123456","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID) // Partial match
+		expected := fmt.Sprintf(`{"id":"%s","user_id":"%s","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID, validToken.UserID) // Partial match
 		actual := strings.TrimSpace(recorder.Body.String())
 		if !strings.Contains(actual, expected) {
 			t.Errorf("Expected body to contain %q, but got %q", expected, actual)
@@ -536,7 +544,7 @@ func TestHandleGetAgentInfoByID(t *testing.T) {
 		}
 
 		// Set a valid Authorization header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		// Create a test recorder
 		recorder := httptest.NewRecorder()
@@ -565,7 +573,7 @@ func TestHandleStartChat(t *testing.T) {
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			UserID:        "123456",
+			UserID:        validToken.UserID,
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -583,7 +591,7 @@ func TestHandleStartChat(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		assert.NoError(t, err)
 
@@ -614,7 +622,7 @@ func TestHandleStartChat(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		assert.NoError(t, err)
 
@@ -636,7 +644,7 @@ func TestHandleStartChat(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/chat", strings.NewReader(chat))
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		assert.NoError(t, err)
 
@@ -658,7 +666,7 @@ func TestHandleStartChat(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/chat", bytes.NewBufferString(requestBody))
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		assert.NoError(t, err)
 
@@ -676,7 +684,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 	t.Run("ValidRequestText", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			UserID:        "123456",
+			UserID:        validToken.UserID,
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -710,7 +718,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -722,16 +730,16 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, updatedChat.History, 2)
 		assert.Equal(t, "Initial prompt", updatedChat.History[0].Prompt)
-		//assert.Equal(t, "Initial response", updatedChat.History[0].Response) ## won't work as response is randomized now
+		// assert.Equal(t, "Initial response", updatedChat.History[0].Response) ## won't work as response is randomized now
 		assert.Equal(t, "Hello", updatedChat.History[1].Prompt)
-		//assert.Equal(t, "Hi there!", updatedChat.History[1].Response) ## won't work as response is randomized now
+		// assert.Equal(t, "Hi there!", updatedChat.History[1].Response) ## won't work as response is randomized now
 		assert.Equal(t, "text", updatedChat.History[1].Type)
 	})
 
 	t.Run("ValidRequestCommand", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			UserID:        "123456",
+			UserID:        validToken.UserID,
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -765,7 +773,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -786,7 +794,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 	t.Run("InValidRequestPayload", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			UserID:        "123456",
+			UserID:        validToken.UserID,
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -820,7 +828,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -835,7 +843,7 @@ func TestChatService_AddPromptResponse(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -851,7 +859,7 @@ func TestChatService_GetChatByID(t *testing.T) {
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			UserID:        "123456",
+			UserID:        validToken.UserID,
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -882,7 +890,7 @@ func TestChatService_GetChatByID(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -900,7 +908,7 @@ func TestChatService_GetChatByID(t *testing.T) {
 	t.Run("NonExistentChat", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			UserID:        "123456",
+			UserID:        validToken.UserID,
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -930,7 +938,7 @@ func TestChatService_GetChatByID(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -944,7 +952,7 @@ func TestChatService_GetChatByID(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1012,17 +1020,10 @@ func TestHandleAgentInfosWithAPIKey(t *testing.T) {
 	server, cleanup, validToken, _ := setupServer(t)
 	defer cleanup()
 
-	// Get the userID
-	// TO-DO until all the relationships between collections are sorted
-	claims, err := server.tokenService.GetTokenByHashedToken(context.Background(), token.HashToken(validToken))
-	if err != nil {
-		log.Fatalf("error while fetching claims: %v", err)
-	}
-
 	t.Run("ValidRequest", func(t *testing.T) {
 		// Insert test agent info into the database
 		agentInfo := &agent.AgentInfo{
-			UserID:        claims.UserID,
+			UserID:        validToken.UserID,
 			Hostname:      "test-host",
 			IPAddress:     "192.168.1.1",
 			KernelVersion: "5.10.0",
@@ -1034,7 +1035,8 @@ func TestHandleAgentInfosWithAPIKey(t *testing.T) {
 		}
 
 		// Fetch the inserted ID
-		agentInfoID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		agentInfo.ID = insertResult.InsertedID.(bson.ObjectID)
+		agentInfoID := agentInfo.ID.Hex()
 
 		// Create a test request to retrieve agents
 		req, err := http.NewRequest("GET", "/api/agents", nil)
@@ -1043,18 +1045,35 @@ func TestHandleAgentInfosWithAPIKey(t *testing.T) {
 		}
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
 
 		assert.Equal(t, http.StatusOK, recorder.Code)
 
-		// Check the response body
-		expected := fmt.Sprintf(`[{"id":"%s","user_id":"%s","hostname":"test-host","ip_address":"192.168.1.1","kernel_version":"5.10.0"`, agentInfoID, claims.UserID) // Partial match
-		actual := strings.TrimSpace(recorder.Body.String())
-		if !strings.Contains(actual, expected) {
-			t.Errorf("Expected body to contain %q, but got %q", expected, actual)
+		// Unmarshal the response body into a slice of AgentInfo
+		var actualAgentInfos []agent.AgentInfo
+		err = json.Unmarshal(recorder.Body.Bytes(), &actualAgentInfos)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal response body: %v", err)
+		}
+
+		// Check if the expected agent info is present in the actual response
+		found := false
+		for _, actualAgent := range actualAgentInfos {
+			if actualAgent.ID.Hex() == agentInfoID &&
+				actualAgent.UserID == agentInfo.UserID &&
+				actualAgent.Hostname == agentInfo.Hostname &&
+				actualAgent.IPAddress == agentInfo.IPAddress &&
+				actualAgent.KernelVersion == agentInfo.KernelVersion {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Errorf("Expected to find the inserted agent info in the response, but it was not found.\nExpected ID: %s\nActual Response: %s", agentInfoID, recorder.Body.String())
 		}
 	})
 
@@ -1065,16 +1084,12 @@ func TestHandleFetchUserInfoFromID(t *testing.T) {
 	defer cleanup()
 
 	t.Run("ValidEmail", func(t *testing.T) {
-		// Get the User via email
-		user, err := server.userService.GetUserByEmail(context.Background(), "test@example.com")
-		assert.NoError(t, err)
-
 		// Get the user via ID
-		req, err := http.NewRequest("GET", fmt.Sprintf("/api/user/%s", user.ID.Hex()), nil)
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/user/%s", validToken.UserID), nil)
 		assert.NoError(t, err)
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1095,7 +1110,7 @@ func TestHandleFetchUserInfoFromID(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Set a valid X-NANNYAPI-Key header
-		req.Header.Set("X-NANNYAPI-Key", validToken)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
 
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, req)
@@ -1255,5 +1270,544 @@ func TestHandleRefreshToken(t *testing.T) {
 		expected := "Refresh token is required"
 		actual := strings.TrimSpace(recorder.Body.String())
 		assert.Equal(t, expected, actual)
+	})
+}
+
+func TestHandleStartDiagnostic(t *testing.T) {
+	server, cleanup, validToken, _ := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// Insert test agent info into the database
+		agentInfo := &agent.AgentInfo{
+			UserID:        validToken.UserID,
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+			SystemMetrics: agent.SystemMetrics{
+				CPUInfo:     []string{"Intel i7-1165G7"},
+				CPUUsage:    45.5,
+				MemoryTotal: 16 * 1024 * 1024 * 1024, // 16GB
+				MemoryUsed:  8 * 1024 * 1024 * 1024,  // 8GB
+				MemoryFree:  8 * 1024 * 1024 * 1024,  // 8GB
+				DiskUsage: map[string]int64{
+					"/":     250 * 1024 * 1024 * 1024, // 250GB
+					"/home": 500 * 1024 * 1024 * 1024, // 500GB
+				},
+				FSUsage: map[string]string{
+					"/":     "45%",
+					"/home": "60%",
+				},
+			},
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		assert.NoError(t, err)
+
+		agentID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		session, err := server.diagnosticService.StartDiagnosticSession(
+			context.Background(),
+			agentID,
+			validToken.UserID,
+			"High CPU usage",
+		)
+		assert.NoError(t, err)
+
+		assert.NotEmpty(t, session.ID)
+		assert.Equal(t, agentID, session.AgentID)
+		assert.Equal(t, "High CPU usage", session.InitialIssue)
+		assert.Equal(t, 0, session.CurrentIteration)
+		assert.Equal(t, "in_progress", session.Status)
+		assert.NotEmpty(t, session.History)
+
+		// Verify system metrics are captured in the diagnostic session
+		assert.NotNil(t, session.History[0].SystemSnapshot)
+		assert.Equal(t, 45.5, session.History[0].SystemSnapshot.CPUUsage)
+		assert.Equal(t, int64(16*1024*1024*1024), session.History[0].SystemSnapshot.MemoryTotal)
+	})
+
+	t.Run("InvalidAgentID", func(t *testing.T) {
+		diagnosticReq := `{
+			"agent_id": "invalid-id",
+			"issue": "High CPU usage"
+		}`
+
+		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "invalid agent ID format")
+	})
+
+	t.Run("NonExistentAgent", func(t *testing.T) {
+		diagnosticReq := fmt.Sprintf(`{
+			"agent_id": "%s",
+			"issue": "High CPU usage"
+		}`, bson.NewObjectID().Hex())
+
+		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		req.Header.Set("Content-Type", "application/json") // Add Content-Type header
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "agent not found")
+	})
+
+	t.Run("MissingRequiredFields", func(t *testing.T) {
+		// Create request with missing required fields
+		diagnosticReq := `{
+			"agent_id": "507f1f77bcf86cd799439011"
+		}`
+
+		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Agent ID and Issue are required")
+	})
+
+	t.Run("UnauthorizedRequest", func(t *testing.T) {
+		diagnosticReq := `{
+			"agent_id": "507f1f77bcf86cd799439011",
+			"issue": "High CPU usage"
+		}`
+
+		req, err := http.NewRequest("POST", "/api/diagnostic", strings.NewReader(diagnosticReq))
+		// Add the Content-Type header
+		req.Header.Set("Content-Type", "application/json")
+
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	})
+}
+
+func TestHandleContinueDiagnostic(t *testing.T) {
+	server, cleanup, validToken, _ := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// First create a diagnostic session
+		agentInfo := &agent.AgentInfo{
+			UserID:        validToken.UserID,
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+			SystemMetrics: agent.SystemMetrics{
+				CPUInfo:     []string{"Intel i7-1165G7"},
+				CPUUsage:    45.5,
+				MemoryTotal: 16 * 1024 * 1024 * 1024,
+				MemoryUsed:  8 * 1024 * 1024 * 1024,
+				MemoryFree:  8 * 1024 * 1024 * 1024,
+				DiskUsage: map[string]int64{
+					"/":     250 * 1024 * 1024 * 1024,
+					"/home": 500 * 1024 * 1024 * 1024,
+				},
+				FSUsage: map[string]string{
+					"/":     "45%",
+					"/home": "60%",
+				},
+			},
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		assert.NoError(t, err)
+
+		agentID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		session, err := server.diagnosticService.StartDiagnosticSession(
+			context.Background(),
+			agentID,
+			validToken.UserID,
+			"High CPU usage",
+		)
+		assert.NoError(t, err)
+
+		// Now continue the session
+		continueReq := fmt.Sprintf(`{
+            "diagnostic_output": [
+                "top - 14:30:00 up 7 days, load average: 2.15, 1.92, 1.74",
+                "Tasks: 180 total, 2 running, 178 sleeping"
+            ],
+            "system_metrics": {
+                "cpu_info": ["Intel i7-1165G7"],
+                "cpu_usage": 45.5,
+                "memory_total": 17179869184,
+                "memory_used": 8589934592,
+                "memory_free": 8589934592,
+                "disk_usage": {
+                    "/": 268435456000,
+                    "/home": 536870912000
+                },
+                "fs_usage": {
+                    "/": "45%%",
+                    "/home": "60%%"
+                }
+            }
+        }`)
+
+		req, err := http.NewRequest("POST", fmt.Sprintf("/api/diagnostic/%s/continue", session.ID.Hex()), strings.NewReader(continueReq))
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		var updatedSession diagnostic.DiagnosticSession
+		err = json.NewDecoder(recorder.Body).Decode(&updatedSession)
+		assert.NoError(t, err)
+		assert.Equal(t, session.ID, updatedSession.ID)
+		assert.Equal(t, 1, updatedSession.CurrentIteration)
+		assert.Greater(t, len(updatedSession.History), 0)
+	})
+
+	t.Run("NonExistentSession", func(t *testing.T) {
+		// First create a diagnostic session
+		agentInfo := &agent.AgentInfo{
+			UserID:        validToken.UserID,
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+			SystemMetrics: agent.SystemMetrics{
+				CPUInfo:     []string{"Intel i7-1165G7"},
+				CPUUsage:    45.5,
+				MemoryTotal: 16 * 1024 * 1024 * 1024,
+				MemoryUsed:  8 * 1024 * 1024 * 1024,
+				MemoryFree:  8 * 1024 * 1024 * 1024,
+				DiskUsage: map[string]int64{
+					"/":     250 * 1024 * 1024 * 1024,
+					"/home": 500 * 1024 * 1024 * 1024,
+				},
+				FSUsage: map[string]string{
+					"/":     "45%",
+					"/home": "60%",
+				},
+			},
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		assert.NoError(t, err)
+
+		agentID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		_, err = server.diagnosticService.StartDiagnosticSession(
+			context.Background(),
+			agentID,
+			validToken.UserID,
+			"High CPU usage",
+		)
+		assert.NoError(t, err)
+
+		continueReq := fmt.Sprintf(`{
+            "diagnostic_output": [
+                "top - 14:30:00 up 7 days, load average: 2.15, 1.92, 1.74",
+                "Tasks: 180 total, 2 running, 178 sleeping"
+            ],
+            "system_metrics": {
+                "cpu_info": ["Intel i7-1165G7"],
+                "cpu_usage": 45.5,
+                "memory_total": 17179869184,
+                "memory_used": 8589934592,
+                "memory_free": 8589934592,
+                "disk_usage": {
+                    "/": 268435456000,
+                    "/home": 536870912000
+                },
+                "fs_usage": {
+                    "/": "45%%",
+                    "/home": "60%%"
+                }
+            }
+        }`)
+
+		req, err := http.NewRequest("POST", fmt.Sprintf("/api/diagnostic/%s/continue", bson.NewObjectID().Hex()), strings.NewReader(continueReq))
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+	})
+
+	t.Run("InvalidSessionID", func(t *testing.T) {
+		continueReq := `{"results": ["test output"]}`
+
+		req, err := http.NewRequest("POST", "/api/diagnostic/invalid-id/continue", strings.NewReader(continueReq))
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "invalid session ID format")
+	})
+}
+
+func TestHandleGetDiagnosticSession(t *testing.T) {
+	server, cleanup, validToken, _ := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// First create a diagnostic session
+		agentInfo := &agent.AgentInfo{
+			UserID:        validToken.UserID,
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		assert.NoError(t, err)
+
+		agentID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		session, err := server.diagnosticService.StartDiagnosticSession(
+			context.Background(),
+			agentID,
+			validToken.UserID,
+			"High CPU usage",
+		)
+		assert.NoError(t, err)
+
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/diagnostic/%s", session.ID.Hex()), nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		var fetchedSession diagnostic.DiagnosticSession
+		err = json.NewDecoder(recorder.Body).Decode(&fetchedSession)
+		assert.NoError(t, err)
+		assert.Equal(t, session.ID, fetchedSession.ID)
+		assert.Equal(t, session.AgentID, fetchedSession.AgentID)
+		assert.Equal(t, session.InitialIssue, fetchedSession.InitialIssue)
+	})
+
+	t.Run("NonExistentSession", func(t *testing.T) {
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/diagnostic/%s", bson.NewObjectID().Hex()), nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+	})
+
+	t.Run("InvalidSessionID", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "/api/diagnostic/invalid-id", nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "invalid session ID format\n")
+	})
+}
+
+func TestHandleDeleteDiagnostic(t *testing.T) {
+	server, cleanup, validToken, _ := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// First create a diagnostic session
+		agentInfo := &agent.AgentInfo{
+			UserID:        validToken.UserID,
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		assert.NoError(t, err)
+
+		agentID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		session, err := server.diagnosticService.StartDiagnosticSession(
+			context.Background(),
+			agentID,
+			validToken.UserID,
+			"High CPU usage",
+		)
+		assert.NoError(t, err)
+
+		req, err := http.NewRequest("DELETE", fmt.Sprintf("/api/diagnostic/%s", session.ID.Hex()), nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		// Verify session was deleted
+		_, err = server.diagnosticService.GetDiagnosticSession(context.Background(), session.ID.Hex())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "session not found")
+	})
+
+	t.Run("NonExistentSession", func(t *testing.T) {
+		req, err := http.NewRequest("DELETE", fmt.Sprintf("/api/diagnostic/%s", bson.NewObjectID().Hex()), nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+	})
+
+	t.Run("InvalidSessionID", func(t *testing.T) {
+		req, err := http.NewRequest("DELETE", "/api/diagnostic/invalid-id", nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "Invalid session ID format\n")
+	})
+}
+
+func TestHandleListDiagnostics(t *testing.T) {
+	server, cleanup, validToken, _ := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// First create a diagnostic session
+		agentInfo := &agent.AgentInfo{
+			UserID:        validToken.UserID,
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		assert.NoError(t, err)
+
+		agentID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		session, err := server.diagnosticService.StartDiagnosticSession(
+			context.Background(),
+			agentID,
+			validToken.UserID,
+			"High CPU usage",
+		)
+		assert.NoError(t, err)
+
+		req, err := http.NewRequest("GET", "/api/diagnostics", nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		var sessions []*diagnostic.DiagnosticSession
+		err = json.NewDecoder(recorder.Body).Decode(&sessions)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, sessions)
+		assert.Equal(t, session.ID, sessions[0].ID)
+		assert.Equal(t, session.AgentID, sessions[0].AgentID)
+	})
+
+	t.Run("UnauthorizedRequest", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "/api/diagnostics", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	})
+}
+
+func TestHandleGetDiagnosticSummary(t *testing.T) {
+	server, cleanup, validToken, _ := setupServer(t)
+	defer cleanup()
+
+	t.Run("ValidRequest", func(t *testing.T) {
+		// First create a diagnostic session
+		agentInfo := &agent.AgentInfo{
+			UserID:        validToken.UserID,
+			Hostname:      "test-host",
+			IPAddress:     "192.168.1.1",
+			KernelVersion: "5.10.0",
+			OsVersion:     "Ubuntu 24.04",
+		}
+		insertResult, err := server.agentInfoService.SaveAgentInfo(context.Background(), *agentInfo)
+		assert.NoError(t, err)
+
+		agentID := insertResult.InsertedID.(bson.ObjectID).Hex()
+		session, err := server.diagnosticService.StartDiagnosticSession(
+			context.Background(),
+			agentID,
+			validToken.UserID,
+			"High CPU usage",
+		)
+		assert.NoError(t, err)
+
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/diagnostic/%s/summary", session.ID.Hex()), nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		var response map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&response)
+		assert.NoError(t, err)
+		assert.Contains(t, response["summary"], "High CPU usage")
+		assert.Contains(t, response["summary"], "Diagnostic Summary")
+	})
+
+	t.Run("NonExistentSession", func(t *testing.T) {
+		req, err := http.NewRequest("GET", fmt.Sprintf("/api/diagnostic/%s/summary", bson.NewObjectID().Hex()), nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+	})
+
+	t.Run("InvalidSessionID", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "/api/diagnostic/invalid-id/summary", nil)
+		assert.NoError(t, err)
+		req.Header.Set("X-NANNYAPI-Key", validToken.Token)
+
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), "invalid session ID format")
 	})
 }

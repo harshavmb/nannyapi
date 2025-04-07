@@ -251,7 +251,7 @@
         },
         "/api/auth-tokens": {
             "get": {
-                "description": "Retrieves all auth tokens for the authenticated user.",
+                "description": "Retrieves all auth tokens for the authenticated user",
                 "produces": [
                     "application/json"
                 ],
@@ -428,6 +428,306 @@
                 }
             }
         },
+        "/api/diagnostic": {
+            "post": {
+                "description": "Start a new diagnostic session for an agent",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "diagnostic"
+                ],
+                "summary": "Start diagnostic session",
+                "parameters": [
+                    {
+                        "description": "Start diagnostic request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.StartDiagnosticRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/diagnostic.DiagnosticSession"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request format",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/diagnostic/{id}": {
+            "get": {
+                "description": "Get details of a diagnostic session",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "diagnostic"
+                ],
+                "summary": "Get diagnostic session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/diagnostic.DiagnosticSession"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid session ID format",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a diagnostic session and its associated data",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "diagnostic"
+                ],
+                "summary": "Delete a diagnostic session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Session deleted successfully",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid session ID",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "403": {
+                        "description": "User not authorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/diagnostic/{id}/continue": {
+            "post": {
+                "description": "Continue an existing Linux system diagnostic session",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "diagnostic"
+                ],
+                "summary": "Continue a diagnostic session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Command results",
+                        "name": "diagnostic_output",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/diagnostic.DiagnosticSession"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/diagnostic/{id}/summary": {
+            "get": {
+                "description": "Get a summary of the diagnostic session",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "diagnostic"
+                ],
+                "summary": "Get diagnostic summary",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Diagnostic summary",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid session ID format",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/diagnostics": {
+            "get": {
+                "description": "List all diagnostic sessions for the authenticated user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "diagnostic"
+                ],
+                "summary": "List diagnostic sessions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/diagnostic.DiagnosticSession"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/api/refresh-token": {
             "post": {
                 "description": "Handle refresh token validation, creation and creation of accessTokens too",
@@ -574,61 +874,6 @@
                 }
             }
         },
-        "/chat": {
-            "post": {
-                "description": "Chat with the model",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "chat"
-                ],
-                "summary": "Chat with the model",
-                "parameters": [
-                    {
-                        "description": "Chat request",
-                        "name": "chat",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/server.chatRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
         "/status": {
             "get": {
                 "description": "Status of the API",
@@ -690,8 +935,56 @@
                 "os_version": {
                     "type": "string"
                 },
+                "system_metrics": {
+                    "$ref": "#/definitions/agent.SystemMetrics"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
                 "user_id": {
                     "type": "string"
+                }
+            }
+        },
+        "agent.SystemMetrics": {
+            "type": "object",
+            "properties": {
+                "cpu_info": {
+                    "description": "CPU information from /proc/cpuinfo",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "cpu_usage": {
+                    "description": "Current CPU usage percentage",
+                    "type": "number"
+                },
+                "disk_usage": {
+                    "description": "Disk usage per mount point in bytes",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "fs_usage": {
+                    "description": "Filesystem usage percentages",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "memory_free": {
+                    "description": "Free memory in bytes",
+                    "type": "integer"
+                },
+                "memory_total": {
+                    "description": "Total memory in bytes",
+                    "type": "integer"
+                },
+                "memory_used": {
+                    "description": "Used memory in bytes",
+                    "type": "integer"
                 }
             }
         },
@@ -730,39 +1023,115 @@
                 }
             }
         },
-        "server.chatRequest": {
+        "diagnostic.DiagnosticCommand": {
             "type": "object",
             "properties": {
-                "chat": {
+                "command": {
                     "type": "string"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "diagnostic.DiagnosticResponse": {
+            "type": "object",
+            "properties": {
+                "commands": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/diagnostic.DiagnosticCommand"
+                    }
+                },
+                "diagnosis_type": {
+                    "type": "string"
+                },
+                "impact": {
+                    "type": "string"
+                },
+                "log_checks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/diagnostic.LogCheck"
+                    }
+                },
+                "next_step": {
+                    "type": "string"
+                },
+                "root_cause": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "system_snapshot": {
+                    "$ref": "#/definitions/agent.SystemMetrics"
+                }
+            }
+        },
+        "diagnostic.DiagnosticSession": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "current_iteration": {
+                    "type": "integer"
                 },
                 "history": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/server.content"
-                    }
-                }
-            }
-        },
-        "server.content": {
-            "type": "object",
-            "properties": {
-                "parts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/server.part"
+                        "$ref": "#/definitions/diagnostic.DiagnosticResponse"
                     }
                 },
-                "role": {
+                "id": {
+                    "type": "string"
+                },
+                "initial_issue": {
+                    "type": "string"
+                },
+                "max_iterations": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
                     "type": "string"
                 }
             }
         },
-        "server.part": {
+        "diagnostic.LogCheck": {
             "type": "object",
             "properties": {
-                "text": {
+                "grep_pattern": {
                     "type": "string"
+                },
+                "log_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.StartDiagnosticRequest": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string"
+                },
+                "issue": {
+                    "type": "string"
+                },
+                "system_info": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 }
             }
         },

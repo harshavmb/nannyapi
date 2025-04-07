@@ -13,13 +13,13 @@ import (
 	githubOAuth2 "golang.org/x/oauth2/github"
 )
 
-// MockOAuth2Config is a mock implementation of oauth2.Config
+// MockOAuth2Config is a mock implementation of oauth2.Config.
 type MockOAuth2Config struct {
 	oauth2.Config
 	ExchangeFunc func(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error)
 }
 
-// Override the Exchange method for mocking
+// Override the Exchange method for mocking.
 func (m *MockOAuth2Config) Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
 	if m.ExchangeFunc != nil {
 		return m.ExchangeFunc(ctx, code, opts...)
@@ -27,12 +27,12 @@ func (m *MockOAuth2Config) Exchange(ctx context.Context, code string, opts ...oa
 	return nil, fmt.Errorf("mock Exchange not implemented")
 }
 
-// Helper function to check if a string contains a substring
+// Helper function to check if a string contains a substring.
 func contains(str, substr string) bool {
 	return len(str) >= len(substr) && str[:len(substr)] == substr
 }
 
-// Test for HandleGitHubLogin
+// Test for HandleGitHubLogin.
 func TestHandleGitHubLogin(t *testing.T) {
 	// Initialize GitHubAuth with environment variables
 	githubAuth := &GitHubAuth{

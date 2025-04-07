@@ -1,48 +1,83 @@
-# Contributing to nannyapi
+# Contributing to NannyAPI
 
-We welcome contributions to nannyapi! This document outlines the guidelines and best practices for contributing to the project.
+Thank you for your interest in contributing to NannyAPI! This document provides guidelines and instructions for contributing.
 
-## Code of Conduct
+## Development Process
 
-We are committed to providing a friendly, safe, and welcoming environment for all. Please be respectful and considerate of others in your interactions. We do not tolerate harassment or discrimination of any kind.
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to your branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## How to Contribute
+## Code Style Guidelines
 
-1.  **Fork the repository:** Start by forking the repository to your GitHub account.
-2.  **Create a branch:** Create a new branch for your feature or bug fix.
-3.  **Make changes:** Implement your changes, following the guidelines below.
-4.  **Test your changes:** Ensure that your changes are working correctly and that all tests pass.
-5.  **Submit a pull request:** Submit a pull request to the main branch of the repository.
-
-## Contribution Guidelines
-
-*   **Provide use cases:** Clearly explain the use cases that your contribution addresses.
-*   **Write tests:** Include unit tests and integration tests to ensure the quality and reliability of your code.
-*   **Follow coding conventions:** Adhere to the coding conventions and style guidelines used in the project.
-*   **Document your code:** Provide clear and concise documentation for your code.
-*   **Keep pull requests small:** Break large changes into smaller, more manageable pull requests.
-*   **Be responsive:** Respond to feedback and address any issues raised during the review process.
-
-## Style Guidelines
-
-*   Use descriptive variable and function names.
-*   Write clear and concise comments.
-*   Follow the Go coding style guidelines.
+- Follow standard Go coding conventions
+- Use `gofmt` to format your code
+- Run `go vet` and `staticcheck` before committing
+- Maintain test coverage above 80%
+- Document all exported functions and types
+- Keep functions small and focused
+- Use meaningful variable names
 
 ## Testing
 
-*   Write unit tests for all new code.
-*   Run tests before submitting a pull request.
-*   Ensure that all tests pass.
+- Write tests for all new features
+- Maintain or improve code coverage
+- Run the full test suite before submitting a PR
+- Include both unit and integration tests where appropriate
+
+## Documentation
+
+- Update API documentation when modifying endpoints
+- Run `swag init` to update Swagger docs
+- Keep README.md up to date
+- Document complex algorithms and business logic
+- Include examples in documentation where helpful
+
+## Pull Request Process
+
+1. Follow the PR template
+2. Ensure all tests pass
+3. Update relevant documentation
+4. Add test cases for new functionality
+5. Request review from maintainers
+6. Address review comments promptly
 
 ## Commit Messages
 
-*   Use clear and concise commit messages.
-*   Include a brief summary of the changes in the first line.
-*   Provide additional details in the body of the commit message.
+- Use clear and meaningful commit messages
+- Follow conventional commits format:
+  - feat: New feature
+  - fix: Bug fix
+  - docs: Documentation changes
+  - test: Adding tests
+  - refactor: Code refactoring
+  - style: Formatting changes
+  - chore: Maintenance tasks
 
-## Questions?
+## Code Review
 
-If you have any questions or need help, please feel free to reach out to us.
+- Be respectful and constructive in reviews
+- Focus on code quality and correctness
+- Consider performance implications
+- Check for security issues
+- Verify documentation updates
 
-Thank you for your contributions!
+## Getting Help
+
+- Create an issue for bug reports
+- Use discussions for questions
+- Tag maintainers for urgent issues
+- Join our community chat for real-time help
+
+## Security Issues
+
+- Report security vulnerabilities privately
+- Do not create public issues for security bugs
+- Contact maintainers directly
+- Follow responsible disclosure practices
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the GNU General Public License v3.0.

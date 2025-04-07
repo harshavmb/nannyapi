@@ -1,0 +1,51 @@
+run:
+  timeout: 5m
+  skip-dirs:
+    - vendor
+
+linters:
+  enable:
+    - gofmt
+    - govet
+    - errcheck
+    - staticcheck
+    - gosimple
+    - ineffassign
+    - unused
+    - gosec
+    - prealloc
+    - unconvert
+    - gocritic
+    - gocognit
+    - bodyclose
+    - goconst
+    - gocyclo
+    - godot
+    - goimports
+    - revive
+
+linters-settings:
+  govet:
+    check-shadowing: true
+  gocyclo:
+    min-complexity: 15
+  godot:
+    scope: declarations
+  goimports:
+    local-prefixes: github.com/harshavmb/nannyapi
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+
+output:
+  format: colored-line-number
+  sort-results: true

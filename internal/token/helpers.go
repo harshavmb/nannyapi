@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	// Alphanumeric characters for token generation
+	// Alphanumeric characters for token generation.
 	alphanumeric = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	Issuer       = "https://nannyai.dev"
 )
@@ -25,12 +25,18 @@ const (
 // from https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go
 func GenerateRandomString(length int) string {
 	buff := make([]byte, int(math.Ceil(float64(length)/float64(1.33333333333))))
-	rand.Read(buff)
+	if _, err := rand.Read(buff); err != nil {
+		// G104 (CWE-703): Errors unhandled (Confidence: HIGH, Severity: LOW)
+		// If we can't generate random bytes, log the error and return an empty string
+		// This is a critical error that should be extremely rare
+		log.Printf("Failed to generate random string: %v", err)
+		return ""
+	}
 	str := base64.RawURLEncoding.EncodeToString(buff)
 	return str[:length] // strip 1 extra character we get from odd length results
 }
 
-// hashToken hashes the token using SHA-256.
+// HashToken hashes the token using SHA-256.
 func HashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return base64.StdEncoding.EncodeToString(hash[:])
@@ -51,30 +57,30 @@ func Encrypt(stringToEncrypt, encryptionKey string) (string, error) {
 
 	plaintext := []byte(stringToEncrypt)
 
-	//Create a new Cipher Block from the key
+	// Create a new Cipher Block from the key
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
 
-	//Create a new GCM - Galois Counter Mode - authentication mode
+	// Create a new GCM - Galois Counter Mode - authentication mode
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
 		return "", err
 	}
 
-	//Create a nonce. Nonce should be from GCM
+	// Create a nonce. Nonce should be from GCM
 	nonce := make([]byte, aesGCM.NonceSize())
 	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", err
 	}
 
-	//Encrypt the data using aesGCM.Seal
+	// Encrypt the data using aesGCM.Seal
 	ciphertext := aesGCM.Seal(nonce, nonce, plaintext, nil)
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// Decrypt method
+// Decrypt method.
 func Decrypt(encryptedString string, encryptionKey string) (string, error) {
 	// Base64 decode the encryption key
 	key, err := base64.StdEncoding.DecodeString(encryptionKey)
@@ -93,25 +99,25 @@ func Decrypt(encryptedString string, encryptionKey string) (string, error) {
 		return "", fmt.Errorf("failed to base64 decode encrypted string: %v", err)
 	}
 
-	//Create a new Cipher Block from the key
+	// Create a new Cipher Block from the key
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
 
-	//Create a new GCM - Galois Counter Mode - authentication mode
+	// Create a new GCM - Galois Counter Mode - authentication mode
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
 		return "", err
 	}
 
-	//Get the nonce size
+	// Get the nonce size
 	nonceSize := aesGCM.NonceSize()
 
-	//Extract the nonce from the encrypted data
+	// Extract the nonce from the encrypted data
 	nonce, ciphertext := enc[:nonceSize], enc[nonceSize:]
 
-	//Decrypt the data
+	// Decrypt the data
 	plaintext, err := aesGCM.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return "", err
@@ -120,7 +126,7 @@ func Decrypt(encryptedString string, encryptionKey string) (string, error) {
 	return string(plaintext), nil
 }
 
-// generateJWT generates both JWT Access & refresh tokens with the given claims
+// generateJWT generates both JWT Access & refresh tokens with the given claims.
 func GenerateJWT(UserID string, duration time.Duration, tokenType, jwtSecret string) (string, error) {
 	claims := Claims{
 		UserID: UserID,
@@ -144,7 +150,7 @@ func GenerateJWT(UserID string, duration time.Duration, tokenType, jwtSecret str
 	return tokenString, nil
 }
 
-// validates the JWT token
+// validates the JWT token.
 func ValidateJWTToken(tokenString, jwtSecret string) (*Claims, error) {
 	claims := &Claims{}
 

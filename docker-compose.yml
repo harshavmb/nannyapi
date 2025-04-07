@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017
+      - NANNY_ENCRYPTION_KEY=${NANNY_ENCRYPTION_KEY}
+      - GH_CLIENT_ID=${GH_CLIENT_ID}
+      - GH_CLIENT_SECRET=${GH_CLIENT_SECRET}
+    depends_on:
+      - mongo
+    networks:
+      - nanny_network
+
+  mongo:
+    image: mongo:4.4
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - nanny_network
+
+networks:
+  nanny_network:
+    driver: bridge
+
+volumes:
+  mongodb_data:

@@ -2,30 +2,81 @@ name: CI
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
-  build:
+  test:
+    name: Run Tests
     runs-on: ubuntu-latest
 
+    # Uncomment the following lines to enable MongoDB service
+    #services:
+    #  mongodb:
+    #    image: mongo:4.4
+    #    ports:
+    #      - 27017:27017
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Set up Go
-      uses: actions/setup-go@v2
+      uses: actions/setup-go@v4
       with:
-        go-version: 1.22
+        go-version: '1.24'
 
-    - name: Install dependencies
-      run: go mod tidy
+    - name: Verify dependencies
+      run: go mod verify
 
-    - name: Run tests
-      run: go test ./...
+    - name: Run go fmt
+      run: if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then exit 1; fi
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Install staticcheck
+      run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+    - name: Run staticcheck
+      run: staticcheck ./...
+
+    - name: Check swagger docs
+      run: |
+        go install github.com/swaggo/swag/cmd/swag@latest
+        swag init -d . -g cmd/main.go
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "Swagger docs are not up to date. Please run 'swag init' and commit the changes."
+          exit 1
+        fi
+
+    - name: Run all tests except internal/server
+      run: |
+        packages=$(go list ./... | grep -v '/internal/server')
+        if [[ -n "$packages" ]]; then
+          go test $packages -v -race -coverprofile=coverage.txt -covermode=atomic
+        else
+          echo "No packages found outside of internal/server to test."
+        fi
       env:
         GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
         GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
         MONGODB_URI: ${{ secrets.MONGODB_URI }}
         NANNY_ENCRYPTION_KEY: ${{ secrets.NANNY_ENCRYPTION_KEY }}
         JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+    - name: Run internal/server tests ## conflicting with the previous step
+      run: go test ./internal/server -v -race -coverprofile=coverage.txt -covermode=atomic
+      env:
+        GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
+        GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+        MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        NANNY_ENCRYPTION_KEY: ${{ secrets.NANNY_ENCRYPTION_KEY }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.txt
+        fail_ci_if_error: true
+        token: ${{ secrets.CODECOV_TOKEN }}
