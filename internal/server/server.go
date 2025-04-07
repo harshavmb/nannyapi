@@ -233,6 +233,16 @@ func (s *Server) handleRefreshToken() http.HandlerFunc {
 }
 
 // handleFetchUserInfo handles fetching user information.
+// @Summary Get user information
+// @Description Retrieves user information by ID
+// @Tags users
+// @Produce json
+// @Param id path string true "User ID"
+// @Success 200 {object} user.User "Successfully retrieved user info"
+// @Failure 400 {string} string "Invalid user ID format or User ID is required"
+// @Failure 404 {string} string "User not found"
+// @Failure 500 {string} string "Failed to retrieve user info"
+// @Router /api/user/{id} [get].
 func (s *Server) handleFetchUserInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -510,6 +520,16 @@ func (s *Server) handleDeleteAuthToken() http.HandlerFunc {
 }
 
 // handleAgentInfo handles the ingestion of agent information.
+// @Summary Create agent information
+// @Description Creates or updates agent information with system metrics
+// @Tags agent-info
+// @Accept json
+// @Produce json
+// @Success 201 {object} map[string]string "Successfully created agent info"
+// @Failure 400 {string} string "Invalid request payload or missing required fields"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 500 {string} string "Failed to save agent info"
+// @Router /api/agent-info [post].
 func (s *Server) handleAgentInfo() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -596,7 +616,18 @@ func (s *Server) handleAgentInfos() http.HandlerFunc {
 	}
 }
 
-// @Param id path string true "Agent ID".
+// handleGetAgentInfoByID retrieves agent information by ID
+// @Summary Get specific agent info
+// @Description Retrieves agent information for a specific agent ID
+// @Tags agent-info
+// @Produce json
+// @Param id path string true "Agent ID"
+// @Success 200 {object} agent.AgentInfo "Successfully retrieved agent info"
+// @Failure 400 {string} string "Invalid ID format or Agent ID is required"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 404 {string} string "Agent info not found"
+// @Failure 500 {string} string "Failed to retrieve agent info"
+// @Router /api/agent-info/{id} [get].
 func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -641,6 +672,18 @@ func (s *Server) handleGetAgentInfoByID() http.HandlerFunc {
 }
 
 // handleStartDiagnostic starts a new diagnostic session.
+// @Summary Start diagnostic session
+// @Description Start a new Linux system diagnostic session
+// @Tags diagnostic
+// @Accept json
+// @Produce json
+// @Param request body diagnostic.StartDiagnosticRequest true "Start diagnostic request"
+// @Success 201 {object} diagnostic.DiagnosticSession "Successfully created diagnostic session"
+// @Failure 400 {string} string "Invalid request payload or missing required fields"
+// @Failure 401 {string} string "User not authenticated"
+// @Failure 403 {string} string "User not authorized"
+// @Failure 500 {string} string "Internal server error"
+// @Router /api/diagnostic [post].
 func (s *Server) handleStartDiagnostic() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
