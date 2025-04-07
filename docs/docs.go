@@ -23,6 +23,103 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/agent-info": {
+            "post": {
+                "description": "Creates or updates agent information with system metrics",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-info"
+                ],
+                "summary": "Create agent information",
+                "responses": {
+                    "201": {
+                        "description": "Successfully created agent info",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload or missing required fields",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to save agent info",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/agent-info/{id}": {
+            "get": {
+                "description": "Retrieves agent information for a specific agent ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent-info"
+                ],
+                "summary": "Get specific agent info",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successfully retrieved agent info",
+                        "schema": {
+                            "$ref": "#/definitions/agent.AgentInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID format or Agent ID is required",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Agent info not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve agent info",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/api/agents": {
             "get": {
                 "description": "Retrieves agent information by ID.",
@@ -180,6 +277,64 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Failed to retrieve auth tokens",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/diagnostic": {
+            "post": {
+                "description": "Start a new Linux system diagnostic session",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "diagnostic"
+                ],
+                "summary": "Start diagnostic session",
+                "parameters": [
+                    {
+                        "description": "Start diagnostic request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/diagnostic.StartDiagnosticRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Successfully created diagnostic session",
+                        "schema": {
+                            "$ref": "#/definitions/diagnostic.DiagnosticSession"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request payload or missing required fields",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "403": {
+                        "description": "User not authorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "schema": {
                             "type": "string"
                         }
@@ -534,6 +689,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/user/{id}": {
+            "get": {
+                "description": "Retrieves user information by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get user information",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successfully retrieved user info",
+                        "schema": {
+                            "$ref": "#/definitions/user.User"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid user ID format or User ID is required",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to retrieve user info",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/status": {
             "get": {
                 "description": "Status of the API",
@@ -757,6 +959,17 @@ const docTemplate = `{
                 }
             }
         },
+        "diagnostic.StartDiagnosticRequest": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "issue": {
+                    "type": "string"
+                }
+            }
+        },
         "token.Token": {
             "type": "object",
             "properties": {
@@ -776,6 +989,29 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.User": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "html_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_logged_in": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }

@@ -30,7 +30,7 @@ fmt:
 # Generate Swagger documentation
 swag:
 	which swag > /dev/null || go install github.com/swaggo/swag/cmd/swag@latest
-	swag init -g cmd/main.go
+	swag init -d . -g cmd/main.go
 
 # Clean build artifacts
 clean:
