@@ -84,9 +84,7 @@ func NewServer(githubAuth *auth.GitHubAuth, userService *user.UserService, agent
 func (s *Server) routes() {
 
 	s.mux.HandleFunc("/status", s.handleStatus())
-	s.mux.HandleFunc("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL(s.nannySwaggerURL),
-	))
+	s.mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
 	// GitHub Auth Endpoints
 	s.mux.HandleFunc("/github/login", s.githubAuth.HandleGitHubLogin())
