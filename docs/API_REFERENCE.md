@@ -1306,19 +1306,19 @@ and a structured log line (`app.Logger().Info("realtime event", ...)`).
 | ----------------- | --------------------------------------------------------------------- |
 | `resource_type`   | `patch_operations`, `reboot_operations`, or `investigations`.         |
 | `resource_id`     | ID of the row that changed.                                           |
-| `action`          | `created` or `updated`.                                               |
+| `action`          | `create`, `update`, or `reap_failed`.                                 |
 | `resource_status` | Value of the operation's `status` field at write time.                |
 | `agent_id`        | Target agent when resolvable.                                         |
 | `user_id`         | Owning user when resolvable.                                          |
 | `delivery_status` | `logged` on success, `reaper_failed` when emitted by the reaper.      |
 | `error`           | Reason string (max 500 chars) if the event represents a failure.      |
-| `payload`         | JSON snapshot of the emitting record (max 100KB).                     |
+| `payload`         | `null` for create/update events; reaper-generated events may include a small JSON payload (max 100KB).                    |
 | `created`         | Write timestamp (indexed).                                            |
 
 Typical operational queries:
 
 - "Did the UI receive the patch-complete event?" → filter by
-  `resource_id` and check for an `action=updated` with
+  `resource_id` and check for an `action=update` with
   `resource_status=completed`.
 - "Which operations the reaper had to fail?" → filter by
   `delivery_status=reaper_failed`.
@@ -1327,7 +1327,7 @@ Typical operational queries:
 
 A background cron scans the three tracked collections and marks any
 record stuck in a non-terminal status beyond a configurable timeout as
-failed, then emits a synthetic `reaper_failed` outbox row so UIs and
+failed, then emits a synthetic `reap_failed` outbox row so UIs and
 agents stop spinning forever.
 
 **Terminal-failure status per resource:**

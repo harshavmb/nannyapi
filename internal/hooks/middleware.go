@@ -43,6 +43,7 @@ func LoadAuthContext(app core.App) func(next func(*core.RequestEvent) error) fun
 						if agentsColl, cerr := app.FindCollectionByNameOrId("agents"); cerr == nil {
 							if agent, aerr := app.FindRecordById(agentsColl, agentID); aerr == nil {
 								if agent.GetString("user_id") == user.Id && agent.GetString("status") != "revoked" {
+									e.Auth = agent
 									e.Set("authRecord", agent)
 									e.Set("authViaStaticToken", true)
 									return next(e)
@@ -52,6 +53,7 @@ func LoadAuthContext(app core.App) func(next func(*core.RequestEvent) error) fun
 						// X-Agent-ID specified but invalid: reject explicitly.
 						return e.JSON(http.StatusForbidden, map[string]string{"error": "invalid X-Agent-ID for static token"})
 					}
+					e.Auth = user
 					e.Set("authRecord", user)
 					e.Set("authViaStaticToken", true)
 					return next(e)
@@ -67,6 +69,7 @@ func LoadAuthContext(app core.App) func(next func(*core.RequestEvent) error) fun
 			}
 			if record != nil {
 				e.Set("authRecord", record)
+				e.Auth = record
 			}
 
 			return next(e)
