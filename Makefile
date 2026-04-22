@@ -21,12 +21,17 @@ build-all:
 	@ls -la bin/
 
 # Run all tests
+#
+# We pass -tags no_ui to avoid a PocketBase v0.37.x regression where
+# apis.NewRouter() re-binds the /_/extensions.js route each time it is called
+# (once per ApiScenario), which panics on duplicate registration. The "no_ui"
+# build tag excludes the superuser UI assets and skips that binding entirely.
 test:
-	go test -v -race ./...
+	go test -tags no_ui -v -race ./...
 
 # Run tests with coverage
 coverage:
-	go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+	go test -tags no_ui -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 	go tool cover -html=coverage.txt -o coverage.html
 
 # Run linters

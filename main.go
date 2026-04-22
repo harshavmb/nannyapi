@@ -12,6 +12,8 @@ import (
 
 	"github.com/nannyagent/nannyapi/internal/hooks"
 	"github.com/nannyagent/nannyapi/internal/mfa"
+	realtimeoutbox "github.com/nannyagent/nannyapi/internal/realtime"
+	"github.com/nannyagent/nannyapi/internal/reaper"
 	"github.com/nannyagent/nannyapi/internal/schedules"
 	_ "github.com/nannyagent/nannyapi/pb_migrations"
 )
@@ -76,6 +78,15 @@ func main() {
 	// Register schedulers for patch and reboot schedules
 	schedules.RegisterScheduler(app)
 	schedules.RegisterRebootScheduler(app)
+
+	// Persist an audit trail for every realtime event we emit for tracked
+	// operation records. Addresses the "realtime is a black hole" pain.
+	realtimeoutbox.RegisterOutboxHooks(app)
+
+	// Reap operations that are stuck in non-terminal states beyond the
+	// configured timeout, and emit a synthetic failure event so UIs and
+	// agents stop spinning forever.
+	reaper.Register(app)
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)

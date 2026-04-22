@@ -224,41 +224,108 @@ func HandleRegister(app core.App, c *core.RequestEvent) error {
 	})
 }
 
-// HandleRefreshToken - refresh access token
+// resolveAgentByRefreshToken validates the supplied refresh token and returns
+// the owning agent record. Shared between HandleRefreshToken (no rotation)
+// and HandleRenewRefreshToken (rotation).
+func resolveAgentByRefreshToken(app core.App, token string) (*core.Record, *types.ErrorResponse, int) {
+	if token == "" {
+		return nil, &types.ErrorResponse{Error: "refresh_token required"}, http.StatusBadRequest
+	}
+	hash := HashToken(token)
+	collection, _ := app.FindCollectionByNameOrId("agents")
+	records, err := app.FindRecordsByFilter(collection, "refresh_token_hash = {:hash}", "", 1, 0, map[string]any{"hash": hash})
+	if err != nil || len(records) == 0 {
+		return nil, &types.ErrorResponse{Error: "invalid refresh token"}, http.StatusUnauthorized
+	}
+	agentRecord := records[0]
+	if agentRecord.GetString("status") == string(types.AgentStatusRevoked) {
+		return nil, &types.ErrorResponse{Error: "agent revoked"}, http.StatusUnauthorized
+	}
+	if time.Now().After(agentRecord.GetDateTime("refresh_token_expires").Time()) {
+		return nil, &types.ErrorResponse{Error: "refresh token expired"}, http.StatusUnauthorized
+	}
+	return agentRecord, nil, 0
+}
+
+// HandleRefreshToken - issues a NEW ACCESS TOKEN using a still-valid refresh
+// token. The refresh token itself is NOT rotated here; clients keep using the
+// same refresh token until it is close to expiry, at which point they must
+// call the "renew-refresh-token" action to obtain a new one.
+//
+// This is the standard OAuth2-style refresh flow: short-lived access tokens
+// are obtained often, long-lived refresh tokens rotate rarely.
 func HandleRefreshToken(app core.App, c *core.RequestEvent) error {
 	var req types.RefreshRequest
 	if err := c.BindBody(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "invalid request"})
 	}
 
-	if req.RefreshToken == "" {
-		return c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "refresh_token required"})
+	agentRecord, errResp, status := resolveAgentByRefreshToken(app, req.RefreshToken)
+	if errResp != nil {
+		return c.JSON(status, *errResp)
 	}
 
-	refreshTokenHash := HashToken(req.RefreshToken)
-
-	collection, _ := app.FindCollectionByNameOrId("agents")
-	records, err := app.FindRecordsByFilter(collection, "refresh_token_hash = {:hash}", "", 1, 0, map[string]any{"hash": refreshTokenHash})
-	if err != nil || len(records) == 0 {
-		return c.JSON(http.StatusUnauthorized, types.ErrorResponse{Error: "invalid refresh token"})
-	}
-
-	agentRecord := records[0]
-
-	if time.Now().After(agentRecord.GetDateTime("refresh_token_expires").Time()) {
-		return c.JSON(http.StatusUnauthorized, types.ErrorResponse{Error: "refresh token expired"})
-	}
-
-	// Generate new PocketBase Auth Token
 	accessToken, tokenErr := agentRecord.NewAuthToken()
 	if tokenErr != nil {
 		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to generate token"})
 	}
 
-	return c.JSON(http.StatusOK, types.TokenResponse{
-		AccessToken: accessToken,
-		ExpiresIn:   3600,
-		AgentID:     agentRecord.Id,
+	// RefreshToken intentionally omitted from the response: the existing
+	// refresh token remains valid and unchanged. Clients renew it
+	// explicitly via the "renew-refresh-token" action.
+	refreshExpiresIn := int(time.Until(agentRecord.GetDateTime("refresh_token_expires").Time()).Seconds())
+	if refreshExpiresIn < 0 {
+		refreshExpiresIn = 0
+	}
+	return c.JSON(http.StatusOK, types.RefreshTokenResponse{
+		AccessToken:           accessToken,
+		ExpiresIn:             3600,
+		RefreshTokenExpiresIn: refreshExpiresIn,
+		AgentID:               agentRecord.Id,
+	})
+}
+
+// HandleRenewRefreshToken - rotates the agent's refresh token. The previous
+// refresh token is invalidated immediately; the response contains the NEW
+// refresh token which the client MUST persist before discarding the old one.
+//
+// This endpoint is intended to be called sparingly — typically when the
+// current refresh token is nearing expiry — NOT on every access-token
+// refresh. Rotating on every call would defeat the purpose of the
+// short-lived access / long-lived refresh token split.
+func HandleRenewRefreshToken(app core.App, c *core.RequestEvent) error {
+	var req types.RefreshRequest
+	if err := c.BindBody(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "invalid request"})
+	}
+
+	agentRecord, errResp, status := resolveAgentByRefreshToken(app, req.RefreshToken)
+	if errResp != nil {
+		return c.JSON(status, *errResp)
+	}
+
+	newRefreshToken := generateID()
+	newHash := HashToken(newRefreshToken)
+	refreshLifetime := 30 * 24 * time.Hour
+	newExpiry := time.Now().Add(refreshLifetime)
+
+	agentRecord.Set("refresh_token_hash", newHash)
+	agentRecord.Set("refresh_token_expires", newExpiry)
+	if err := app.Save(agentRecord); err != nil {
+		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to rotate refresh token"})
+	}
+
+	accessToken, tokenErr := agentRecord.NewAuthToken()
+	if tokenErr != nil {
+		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to generate token"})
+	}
+
+	return c.JSON(http.StatusOK, types.RefreshTokenResponse{
+		AccessToken:           accessToken,
+		RefreshToken:          newRefreshToken,
+		ExpiresIn:             3600,
+		RefreshTokenExpiresIn: int(refreshLifetime.Seconds()),
+		AgentID:               agentRecord.Id,
 	})
 }
 
