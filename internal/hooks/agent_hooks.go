@@ -37,6 +37,8 @@ func RegisterAgentHooks(app core.App) {
 				return agents.HandleRegister(app, c)
 			case "refresh":
 				return agents.HandleRefreshToken(app, c)
+			case "renew-refresh-token":
+				return agents.HandleRenewRefreshToken(app, c)
 			case "ingest-metrics":
 				return agents.HandleIngestMetrics(app, c)
 			case "list":
@@ -45,6 +47,12 @@ func RegisterAgentHooks(app core.App) {
 				return agents.HandleRevokeAgent(app, c)
 			case "health":
 				return agents.HandleAgentHealth(app, c)
+			case "create-static-token":
+				return agents.HandleCreateStaticToken(app, c)
+			case "list-static-tokens":
+				return agents.HandleListStaticTokens(app, c)
+			case "revoke-static-token":
+				return agents.HandleRevokeStaticToken(app, c)
 			default:
 				return c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "unknown action"})
 			}

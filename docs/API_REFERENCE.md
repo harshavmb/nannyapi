@@ -154,9 +154,17 @@ If `platform_family` is empty, API attempts to guess from `os_info`:
 
 ---
 
-### 4. Refresh Token
+### 4. Refresh Access Token
 
-Obtain new access token using refresh token.
+Obtain a new **access token** using the current refresh token. The refresh
+token itself is **NOT rotated** by this call — the same refresh token
+remains valid until its 30-day expiry. This is the standard, high-frequency
+flow agents use whenever their access token is about to expire.
+
+To rotate the refresh token itself, use the separate
+[`renew-refresh-token`](#5-renew-refresh-token) action below.
+
+**Authentication:** None (the refresh token in the body is the credential).
 
 **Request:**
 ```json
@@ -171,16 +179,76 @@ Obtain new access token using refresh token.
 {
   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "expires_in": 3600,
+  "refresh_token_expires_in": 2591400,
   "agent_id": "abc123xyz456"
 }
 ```
 
+**Field Descriptions:**
+- `access_token`: Short-lived bearer token for agent API calls.
+- `expires_in`: Access-token lifetime in seconds (1 hour).
+- `refresh_token_expires_in`: Remaining lifetime of the **current**
+  refresh token in seconds. When this approaches zero, the agent should
+  call `renew-refresh-token` to obtain a fresh refresh token.
+- `agent_id`: Identifier of the agent this token belongs to.
+- `refresh_token`: **Not returned** — the existing refresh token is
+  unchanged and MUST continue to be used.
+
 **Errors:**
-- `401`: Invalid or expired refresh token
+- `400`: `refresh_token required`
+- `401`: `invalid refresh token` (unknown or revoked)
+- `401`: `refresh token expired`
+- `401`: `agent revoked`
 
 ---
 
-### 5. Ingest Metrics
+### 5. Renew Refresh Token
+
+Explicitly **rotate** the refresh token. The previous refresh token is
+invalidated immediately and replaced with the one returned here. Agents
+should call this sparingly — typically only when `refresh_token_expires_in`
+from the `refresh` action is approaching zero (e.g. < 24 hours remaining).
+
+The response also includes a fresh access token so the agent can resume
+normal operation without an extra round-trip.
+
+**Authentication:** None (the refresh token in the body is the credential).
+
+**Request:**
+```json
+{
+  "action": "renew-refresh-token",
+  "refresh_token": "f7e8d9c0b1a2938475869faebdcc0123"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d",
+  "expires_in": 3600,
+  "refresh_token_expires_in": 2592000,
+  "agent_id": "abc123xyz456"
+}
+```
+
+**Field Descriptions:**
+- `refresh_token`: **New** refresh token — persist it and discard the old
+  one *before* using the new access token. The old refresh token stops
+  working the instant the server commits the rotation.
+- `access_token`, `expires_in`, `refresh_token_expires_in`, `agent_id`:
+  as described above.
+
+**Errors:**
+- `400`: `refresh_token required`
+- `401`: `invalid refresh token`
+- `401`: `refresh token expired`
+- `401`: `agent revoked`
+
+---
+
+### 6. Ingest Metrics
 
 Agent reports system metrics (typically every 30 seconds).
 
@@ -258,7 +326,7 @@ Agent reports system metrics (typically every 30 seconds).
 
 ---
 
-### 6. List Agents (User)
+### 7. List Agents (User)
 
 Retrieve all agents owned by authenticated user.
 
@@ -305,7 +373,7 @@ Retrieve all agents owned by authenticated user.
 
 ---
 
-### 7. Revoke Agent (User)
+### 8. Revoke Agent (User)
 
 Revoke agent access permanently.
 
@@ -339,7 +407,7 @@ Revoke agent access permanently.
 
 ---
 
-### 8. Agent Health (User)
+### 9. Agent Health (User)
 
 Get detailed health status and latest metrics for an agent.
 
@@ -386,6 +454,157 @@ Get detailed health status and latest metrics for an agent.
 **Notes:**
 - `latest_metrics` is `null` if no metrics have been reported yet
 - Useful for dashboards and monitoring
+
+---
+
+## Static API Tokens
+
+Static tokens are long-lived, user-owned API keys that can be shared by
+one or more agents. Unlike the access/refresh pair, a static token:
+
+- **Does not expire automatically** (unless an optional expiry is set).
+- **Is not rotated** — the same value is used until the owner revokes it.
+- **Can be shared across multiple agents** under the same user account.
+
+All static tokens are prefixed with `nsk_` and contain 32 bytes of
+cryptographically random entropy (hex-encoded). Only a SHA-256 hash of
+the token is stored; the plaintext value is returned **exactly once**,
+at creation time, and cannot be retrieved afterwards.
+
+### Using a Static Token
+
+Pass the token as a Bearer credential on any request:
+```text
+Authorization: Bearer nsk_<hex>
+```
+
+By default the request is authenticated as the **owning user**. To act
+as a specific agent (e.g. for `ingest-metrics` or other per-agent
+endpoints) also include an `X-Agent-ID` header identifying an agent
+belonging to the same user:
+```text
+Authorization: Bearer nsk_<hex>
+X-Agent-ID: <agent_id>
+```
+
+If `X-Agent-ID` does not reference an agent owned by the token's user,
+the request is rejected with `403 invalid X-Agent-ID for static token`.
+
+### 10. Create Static Token (User)
+
+Issues a new static token. The plaintext token appears **only** in this
+response — capture it immediately.
+
+**Authentication:** Required (User).
+
+**Request:**
+```json
+{
+  "action": "create-static-token",
+  "name": "ci-ingestion",
+  "expires_in_days": 90
+}
+```
+
+**Field Descriptions:**
+- `name` (string, required, 1–120 chars): Human-readable label.
+- `expires_in_days` (int, optional): One of `0`, `30`, `60`, `90`, `180`,
+  `365`. `0` (the default) means the token never expires.
+
+**Response (200 OK):**
+```json
+{
+  "token": "nsk_7f2c4b1e3a9d8c6b5a4e3d2c1b0a9f8e7d6c5b4a3928170605040302010fedcb",
+  "token_info": {
+    "id": "tok_abc123",
+    "name": "ci-ingestion",
+    "token_prefix": "nsk_7f2c4b1e",
+    "expires_at": "2026-07-22T10:45:00Z",
+    "revoked": false,
+    "revoked_at": null,
+    "last_used_at": null,
+    "created": "2026-04-22T10:45:00Z"
+  }
+}
+```
+
+**Errors:**
+- `400`: `name required`
+- `400`: `name too long (max 120)`
+- `400`: `expires_in_days must be one of 0, 30, 60, 90, 180, 365`
+- `401`: `authentication required`
+- `403`: `users only` (static token / agent tokens cannot create new
+  static tokens)
+
+---
+
+### 11. List Static Tokens (User)
+
+Returns all static tokens owned by the authenticated user. Plaintext
+values are never returned; only metadata.
+
+**Authentication:** Required (User).
+
+**Request:**
+```json
+{
+  "action": "list-static-tokens"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "tokens": [
+    {
+      "id": "tok_abc123",
+      "name": "ci-ingestion",
+      "token_prefix": "nsk_7f2c4b1e",
+      "expires_at": "2026-07-22T10:45:00Z",
+      "revoked": false,
+      "last_used_at": "2026-04-22T12:03:11Z",
+      "created": "2026-04-22T10:45:00Z"
+    }
+  ]
+}
+```
+
+**Field Descriptions:**
+- `token_prefix`: First 12 characters of the original token (for UI
+  disambiguation only).
+- `expires_at`: `null` if the token never expires.
+- `last_used_at`: Updated on each successful authentication (best effort).
+
+---
+
+### 12. Revoke Static Token (User)
+
+Permanently invalidates a static token. A revoked token cannot be
+restored; issue a new one if needed.
+
+**Authentication:** Required (User).
+
+**Request:**
+```json
+{
+  "action": "revoke-static-token",
+  "token_id": "tok_abc123"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "token revoked"
+}
+```
+
+**Errors:**
+- `400`: `token_id required`
+- `401`: `authentication required`
+- `403`: `not your token`
+- `404`: `token not found`
 
 ---
 
@@ -1062,3 +1281,69 @@ curl -X POST http://localhost:8090/api/patches/patch_001/result \
   -F "stderr_file=@stderr.log" \
   -F "exit_code=0" \
   -F "status=completed"
+
+---
+
+## Operational Observability
+
+NannyAPI persists a server-side audit trail of realtime events and actively
+sweeps operations that get stuck in non-terminal states. This addresses a
+class of failures where PocketBase's built-in realtime (SSE) publish is
+fire-and-forget: each event is handed to every subscriber's buffered
+channel in a goroutine with no persistence, no retry, and no delivery
+ACK. A briefly disconnected agent silently loses events with no trace on
+the server.
+
+### Realtime Message Outbox
+
+Every create/update on `patch_operations`, `reboot_operations`, and
+`investigations` triggers a row in the `realtime_messages` collection
+and a structured log line (`app.Logger().Info("realtime event", ...)`).
+
+**`realtime_messages` fields:**
+
+| Field             | Description                                                           |
+| ----------------- | --------------------------------------------------------------------- |
+| `resource_type`   | `patch_operations`, `reboot_operations`, or `investigations`.         |
+| `resource_id`     | ID of the row that changed.                                           |
+| `action`          | `created` or `updated`.                                               |
+| `resource_status` | Value of the operation's `status` field at write time.                |
+| `agent_id`        | Target agent when resolvable.                                         |
+| `user_id`         | Owning user when resolvable.                                          |
+| `delivery_status` | `logged` on success, `reaper_failed` when emitted by the reaper.      |
+| `error`           | Reason string (max 500 chars) if the event represents a failure.      |
+| `payload`         | JSON snapshot of the emitting record (max 100KB).                     |
+| `created`         | Write timestamp (indexed).                                            |
+
+Typical operational queries:
+
+- "Did the UI receive the patch-complete event?" → filter by
+  `resource_id` and check for an `action=updated` with
+  `resource_status=completed`.
+- "Which operations the reaper had to fail?" → filter by
+  `delivery_status=reaper_failed`.
+
+### Stuck Operation Reaper
+
+A background cron scans the three tracked collections and marks any
+record stuck in a non-terminal status beyond a configurable timeout as
+failed, then emits a synthetic `reaper_failed` outbox row so UIs and
+agents stop spinning forever.
+
+**Terminal-failure status per resource:**
+
+| Collection           | Stuck statuses                    | Set to     | Error field     |
+| -------------------- | --------------------------------- | ---------- | --------------- |
+| `patch_operations`   | `pending`, `running`              | `failed`   | `error_msg`     |
+| `reboot_operations`  | `pending`, `sent`, `rebooting`    | `timeout`  | `error_message` |
+| `investigations`     | `pending`, `in_progress`          | `failed`   | `error`         |
+
+**Environment variables** (both optional; shown with defaults):
+
+| Variable                          | Default | Meaning                                                |
+| --------------------------------- | ------- | ------------------------------------------------------ |
+| `STUCK_OP_TIMEOUT_SECONDS`        | `3600`  | How long an operation may sit in a non-terminal state. |
+| `STUCK_OP_SCAN_INTERVAL_SECONDS`  | `300`   | How often the reaper scans for stuck operations.       |
+
+The reaper starts automatically on server boot (10-second warm-up
+delay). No manual endpoint is required or exposed.

@@ -192,3 +192,80 @@ type HealthResponse struct {
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
+
+// RefreshTokenResponse - response returned by the "refresh" and
+// "renew-refresh-token" actions.
+//
+//   - Action "refresh" (access-token renewal): returns only AccessToken +
+//     ExpiresIn + RefreshTokenExpiresIn (time remaining on the existing,
+//     unchanged refresh token). RefreshToken is empty; the old one remains
+//     valid.
+//   - Action "renew-refresh-token" (refresh-token rotation): returns a NEW
+//     RefreshToken and RefreshTokenExpiresIn reflecting its full lifetime.
+//     Clients MUST persist the new refresh_token immediately — the old
+//     one is invalidated server-side.
+type RefreshTokenResponse struct {
+	AccessToken           string `json:"access_token"`
+	RefreshToken          string `json:"refresh_token,omitempty"`
+	ExpiresIn             int    `json:"expires_in"`
+	RefreshTokenExpiresIn int    `json:"refresh_token_expires_in,omitempty"`
+	AgentID               string `json:"agent_id"`
+}
+
+// StaticTokenExpiryDays enumerates the allowed expiry values (in days) for a
+// static token. A value of 0 means the token never expires.
+var StaticTokenAllowedExpiryDays = map[int]bool{
+	0:   true,
+	30:  true,
+	60:  true,
+	90:  true,
+	180: true,
+	365: true,
+}
+
+// CreateStaticTokenRequest - user creates a shareable static token.
+type CreateStaticTokenRequest struct {
+	Action        string `json:"action"`                    // "create-static-token"
+	Name          string `json:"name"`                      // required, 1..120 chars
+	ExpiresInDays int    `json:"expires_in_days,omitempty"` // 0 (never), 30, 60, 90, 180, 365
+}
+
+// StaticTokenInfo - metadata for a single static token (no plaintext value).
+type StaticTokenInfo struct {
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	TokenPrefix string     `json:"token_prefix"`
+	ExpiresAt   *time.Time `json:"expires_at"` // nil when never expires
+	Revoked     bool       `json:"revoked"`
+	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	Created     time.Time  `json:"created"`
+}
+
+// CreateStaticTokenResponse - the plaintext token is returned ONLY on creation.
+type CreateStaticTokenResponse struct {
+	Token     string          `json:"token"` // show once; cannot be retrieved later
+	TokenInfo StaticTokenInfo `json:"token_info"`
+}
+
+// ListStaticTokensRequest - list current user's static tokens.
+type ListStaticTokensRequest struct {
+	Action string `json:"action"` // "list-static-tokens"
+}
+
+// ListStaticTokensResponse - array of token metadata (no plaintext values).
+type ListStaticTokensResponse struct {
+	Tokens []StaticTokenInfo `json:"tokens"`
+}
+
+// RevokeStaticTokenRequest - revoke a static token owned by the user.
+type RevokeStaticTokenRequest struct {
+	Action  string `json:"action"`   // "revoke-static-token"
+	TokenID string `json:"token_id"` // record id from list-static-tokens
+}
+
+// RevokeStaticTokenResponse - confirmation.
+type RevokeStaticTokenResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
