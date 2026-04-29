@@ -12,6 +12,7 @@ import (
 
 	"github.com/nannyagent/nannyapi/internal/hooks"
 	"github.com/nannyagent/nannyapi/internal/mfa"
+	"github.com/nannyagent/nannyapi/internal/pricing"
 	realtimeoutbox "github.com/nannyagent/nannyapi/internal/realtime"
 	"github.com/nannyagent/nannyapi/internal/reaper"
 	"github.com/nannyagent/nannyapi/internal/schedules"
@@ -74,6 +75,16 @@ func main() {
 
 	// Register proxmox hooks
 	hooks.RegisterProxmoxHooks(app)
+
+	// Register pricing and rate-limiting
+	pricingMgr := pricing.NewManager(app)
+	hooks.RegisterPricingHooks(app, pricingMgr)
+
+	// Reload pricing config once the app is fully bootstrapped (DB ready)
+	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		pricingMgr.ReloadConfig()
+		return e.Next()
+	})
 
 	// Register schedulers for patch and reboot schedules
 	schedules.RegisterScheduler(app)

@@ -3,12 +3,14 @@ package agents
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/nannyagent/nannyapi/internal/types"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/router"
 )
 
 // StaticTokenPrefix is prepended to every generated static token so that
@@ -338,6 +340,11 @@ func HandleRegisterWithStaticToken(app core.App, c *core.RequestEvent) error {
 	// device-code OAuth flow only.
 
 	if err := app.Save(agentRecord); err != nil {
+		// Check if this is a pricing/rate-limit error from hooks
+		var apiErr *router.ApiError
+		if errors.As(err, &apiErr) {
+			return c.JSON(apiErr.Status, types.ErrorResponse{Error: apiErr.Message})
+		}
 		app.Logger().Error("Failed to save agent via static token", "error", err)
 		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to create agent"})
 	}
