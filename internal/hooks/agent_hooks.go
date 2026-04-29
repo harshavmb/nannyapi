@@ -53,6 +53,8 @@ func RegisterAgentHooks(app core.App) {
 				return agents.HandleListStaticTokens(app, c)
 			case "revoke-static-token":
 				return agents.HandleRevokeStaticToken(app, c)
+			case "register-with-token":
+				return agents.HandleRegisterWithStaticToken(app, c)
 			default:
 				return c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "unknown action"})
 			}

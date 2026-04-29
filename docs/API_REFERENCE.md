@@ -608,6 +608,66 @@ restored; issue a new one if needed.
 
 ---
 
+### 13. Register Agent with Static Token
+
+Registers a new agent using a static token instead of the device-code
+OAuth flow. This is the preferred method for automated/CI agent
+provisioning. Unlike the device-code flow:
+
+- **No `device_codes` rows** are created.
+- The agent record does **not** have `device_user_code`,
+  `device_code_id`, `refresh_token_hash`, or `refresh_token_expires`
+  populated.
+- The agent's `auth_method` field is set to `"static_token"`.
+- Subsequent API calls for this agent use the same static token with
+  the `X-Agent-ID` header.
+
+**Authentication:** Required (Static Token only — regular user JWTs are
+rejected with 403).
+
+**Request:**
+```json
+{
+  "action": "register-with-token",
+  "hostname": "prod-web-01",
+  "os_type": "linux",
+  "os_info": "Ubuntu 24.04 LTS",
+  "os_version": "24.04",
+  "version": "2.0.0",
+  "platform_family": "debian",
+  "primary_ip": "10.0.0.5",
+  "kernel_version": "6.8.0",
+  "arch": "amd64",
+  "all_ips": ["10.0.0.5", "172.17.0.1"]
+}
+```
+
+**Field Descriptions:**
+- `hostname` (string, required): Agent hostname.
+- `os_type` (string): `linux`, `darwin`, `windows`.
+- `os_info` (string): Human-readable OS name.
+- `os_version` (string): OS version string.
+- `version` (string): Agent version.
+- `platform_family` (string): `debian`, `rhel`, `suse`, `arch`,
+  `alpine`, `darwin`, `windows`. Auto-detected from `os_info` if omitted.
+- `primary_ip`, `kernel_version`, `arch`, `all_ips`: Optional metadata.
+
+**Response (200 OK):**
+```json
+{
+  "agent_id": "abc123xyz",
+  "message": "agent registered via static token"
+}
+```
+
+**Errors:**
+- `400`: `hostname required`
+- `401`: `authentication required`
+- `403`: `this action requires a static token`
+- `403`: `users only`
+
+---
+
 ## Investigations
 
 Investigation endpoints for AI-powered diagnostics.

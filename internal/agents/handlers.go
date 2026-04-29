@@ -149,6 +149,7 @@ func HandleRegister(app core.App, c *core.RequestEvent) error {
 	agentRecord.Set("last_seen", time.Now())
 	agentRecord.Set("kernel_version", req.KernelVersion)
 	agentRecord.Set("arch", req.Arch)
+	agentRecord.Set("auth_method", "device_code")
 
 	// Fallback for platform_family if missing
 	platformFamily := req.PlatformFamily

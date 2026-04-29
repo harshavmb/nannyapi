@@ -421,3 +421,167 @@ func TestStaticTokenExpiredRejected(t *testing.T) {
 		t.Fatal("expected expired token to be rejected")
 	}
 }
+
+// --- register-with-token ---------------------------------------------------
+
+// TestRegisterWithStaticToken verifies the full lifecycle: create a static
+// token, register an agent using it, and confirm that device-code-only fields
+// (device_user_code, refresh_token_hash, refresh_token_expires) are NOT
+// populated and no device_codes rows are created.
+func TestRegisterWithStaticToken(t *testing.T) {
+	app, mux := buildAgentRouter(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, fmt.Sprintf("rwt_%d@example.com", time.Now().UnixNano()), "TestPass123!")
+	userToken, err := user.NewAuthToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	userHdr := map[string]string{"Authorization": "Bearer " + userToken}
+
+	// Count device_codes rows before registration.
+	dcColl, _ := app.FindCollectionByNameOrId("device_codes")
+	dcBefore, _ := app.FindRecordsByFilter(dcColl, "1=1", "", 1000, 0, nil)
+	dcCountBefore := len(dcBefore)
+
+	// Create a static token.
+	createRec := postAgent(t, mux, map[string]any{
+		"action":          "create-static-token",
+		"name":            "agent-tok",
+		"expires_in_days": 90,
+	}, userHdr)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create-static-token: expected 200, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var created types.CreateStaticTokenResponse
+	readJSON(t, createRec, &created)
+
+	staticHdr := map[string]string{"Authorization": "Bearer " + created.Token}
+
+	// Register agent with the static token.
+	regRec := postAgent(t, mux, map[string]any{
+		"action":          "register-with-token",
+		"hostname":        "static-host",
+		"os_type":         "linux",
+		"os_info":         "Ubuntu 24.04 LTS",
+		"os_version":      "24.04",
+		"version":         "2.0.0",
+		"platform_family": "debian",
+		"primary_ip":      "10.0.0.5",
+		"kernel_version":  "6.8.0",
+		"arch":            "amd64",
+	}, staticHdr)
+	if regRec.Code != http.StatusOK {
+		t.Fatalf("register-with-token: expected 200, got %d: %s", regRec.Code, regRec.Body.String())
+	}
+
+	var regResp types.RegisterWithStaticTokenResponse
+	readJSON(t, regRec, &regResp)
+	if regResp.AgentID == "" {
+		t.Fatal("expected agent_id in response")
+	}
+
+	// Load the agent record and verify forbidden fields are empty.
+	agentsColl, _ := app.FindCollectionByNameOrId("agents")
+	agentRec, err := app.FindRecordById(agentsColl, regResp.AgentID)
+	if err != nil {
+		t.Fatalf("agent not found: %v", err)
+	}
+
+	if v := agentRec.GetString("device_user_code"); v != "" {
+		t.Fatalf("device_user_code should be empty, got %q", v)
+	}
+	if v := agentRec.GetString("refresh_token_hash"); v != "" {
+		t.Fatalf("refresh_token_hash should be empty, got %q", v)
+	}
+	if !agentRec.GetDateTime("refresh_token_expires").Time().IsZero() {
+		t.Fatalf("refresh_token_expires should be zero, got %v", agentRec.GetDateTime("refresh_token_expires"))
+	}
+	if v := agentRec.GetString("device_code_id"); v != "" {
+		t.Fatalf("device_code_id should be empty, got %q", v)
+	}
+	if v := agentRec.GetString("auth_method"); v != "static_token" {
+		t.Fatalf("auth_method should be 'static_token', got %q", v)
+	}
+
+	// Verify basic fields were stored.
+	if agentRec.GetString("hostname") != "static-host" {
+		t.Fatalf("hostname mismatch: %q", agentRec.GetString("hostname"))
+	}
+	if agentRec.GetString("platform_family") != "debian" {
+		t.Fatalf("platform_family mismatch: %q", agentRec.GetString("platform_family"))
+	}
+
+	// No new device_codes rows should have been created.
+	dcAfter, _ := app.FindRecordsByFilter(dcColl, "1=1", "", 1000, 0, nil)
+	if len(dcAfter) != dcCountBefore {
+		t.Fatalf("device_codes rows changed: before=%d after=%d", dcCountBefore, len(dcAfter))
+	}
+}
+
+// TestRegisterWithStaticTokenRequiresStaticToken rejects non-static-token auth.
+func TestRegisterWithStaticTokenRequiresStaticToken(t *testing.T) {
+	app, mux := buildAgentRouter(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, fmt.Sprintf("rwtr_%d@example.com", time.Now().UnixNano()), "TestPass123!")
+	userToken, err := user.NewAuthToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Using a regular user JWT should be rejected.
+	rec := postAgent(t, mux, map[string]any{
+		"action":   "register-with-token",
+		"hostname": "should-fail",
+	}, map[string]string{"Authorization": "Bearer " + userToken})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-static-token auth, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRegisterWithStaticTokenValidation checks required field validation.
+func TestRegisterWithStaticTokenValidation(t *testing.T) {
+	app, mux := buildAgentRouter(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, fmt.Sprintf("rwtv_%d@example.com", time.Now().UnixNano()), "TestPass123!")
+	userToken, _ := user.NewAuthToken()
+	userHdr := map[string]string{"Authorization": "Bearer " + userToken}
+
+	// Create static token.
+	createRec := postAgent(t, mux, map[string]any{
+		"action": "create-static-token",
+		"name":   "val-tok",
+	}, userHdr)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", createRec.Code, createRec.Body.String())
+	}
+	var created types.CreateStaticTokenResponse
+	readJSON(t, createRec, &created)
+
+	staticHdr := map[string]string{"Authorization": "Bearer " + created.Token}
+
+	// Missing hostname should fail.
+	rec := postAgent(t, mux, map[string]any{
+		"action": "register-with-token",
+	}, staticHdr)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing hostname, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "hostname required") {
+		t.Fatalf("expected 'hostname required' error, got: %s", rec.Body.String())
+	}
+
+	// Missing version should fail.
+	rec = postAgent(t, mux, map[string]any{
+		"action":   "register-with-token",
+		"hostname": "test-host",
+	}, staticHdr)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing version, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "version required") {
+		t.Fatalf("expected 'version required' error, got: %s", rec.Body.String())
+	}
+}

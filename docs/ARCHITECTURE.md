@@ -357,7 +357,7 @@ erDiagram
     agents ||--o{ package_exceptions : has
     agents ||--o{ patch_schedules : has
     agents ||--o{ reboot_schedules : has
-    agents ||--|| device_codes : registered_via
+    agents ||--o| device_codes : registered_via
     agents ||--o| reboot_operations : pending_reboot
 
     scripts ||--o{ patch_operations : used_in
@@ -392,8 +392,9 @@ erDiagram
     agents {
         string id PK "Auth collection"
         string user_id FK
-        string device_code_id FK
-        string device_user_code "8-char code for reference"
+        string device_code_id FK "optional, device-code flow only"
+        string device_user_code "device-code flow only"
+        string auth_method "device_code or static_token"
         string hostname
         string os_type "linux (only)"
         string os_info "Ubuntu 22.04 LTS"
@@ -404,8 +405,8 @@ erDiagram
         string version "agent version"
         string primary_ip
         json all_ips "array of IP addresses"
-        string refresh_token_hash "SHA-256 hash"
-        datetime refresh_token_expires "30 days"
+        string refresh_token_hash "device-code flow only"
+        datetime refresh_token_expires "device-code flow only"
         string pending_reboot_id FK "active reboot operation"
         datetime last_seen
         datetime created
