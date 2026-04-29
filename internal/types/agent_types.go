@@ -269,3 +269,27 @@ type RevokeStaticTokenResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
+
+// RegisterWithStaticTokenRequest - agent registers using a static token
+// instead of the device-code OAuth flow. No device_codes row is created and
+// the agent record will NOT have device_user_code, refresh_token_hash, or
+// refresh_token_expires populated.
+type RegisterWithStaticTokenRequest struct {
+	Action         string   `json:"action"`          // "register-with-token"
+	Hostname       string   `json:"hostname"`        // Agent hostname
+	OSType         string   `json:"os_type"`         // OS type (linux, darwin, windows)
+	OSInfo         string   `json:"os_info"`         // OS info (e.g. "Ubuntu 22.04 LTS")
+	OSVersion      string   `json:"os_version"`      // OS version (e.g. "22.04")
+	Version        string   `json:"version"`         // Agent version
+	PrimaryIP      string   `json:"primary_ip"`      // Primary IP address
+	KernelVersion  string   `json:"kernel_version"`  // Kernel version
+	Arch           string   `json:"arch"`            // CPU architecture (amd64, arm64)
+	AllIPs         []string `json:"all_ips"`         // All IP addresses from all NICs
+	PlatformFamily string   `json:"platform_family"` // Platform family (debian, redhat, etc.)
+}
+
+// RegisterWithStaticTokenResponse - returned after static-token registration.
+type RegisterWithStaticTokenResponse struct {
+	AgentID string `json:"agent_id"`
+	Message string `json:"message"`
+}

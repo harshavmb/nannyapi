@@ -3,6 +3,7 @@ package agents
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -241,6 +242,108 @@ func ResolveStaticToken(app core.App, token string) (*core.Record, error) {
 	_ = app.Save(r)
 
 	return user, nil
+}
+
+// HandleRegisterWithStaticToken registers a new agent using a static token.
+// Unlike the device-code flow, this does NOT create a device_codes row and
+// does NOT populate device_user_code, refresh_token_hash, or
+// refresh_token_expires on the agent record.
+func HandleRegisterWithStaticToken(app core.App, c *core.RequestEvent) error {
+	authRec := c.Get("authRecord")
+	if authRec == nil {
+		return c.JSON(http.StatusUnauthorized, types.ErrorResponse{Error: "authentication required"})
+	}
+
+	// Only static-token auth is accepted for this action.
+	if c.Get("authViaStaticToken") == nil || c.Get("authViaStaticToken") != true {
+		return c.JSON(http.StatusForbidden, types.ErrorResponse{Error: "this action requires a static token"})
+	}
+
+	user, ok := authRec.(*core.Record)
+	if !ok || user.Collection().Name != "users" {
+		return c.JSON(http.StatusForbidden, types.ErrorResponse{Error: "users only"})
+	}
+
+	var req types.RegisterWithStaticTokenRequest
+	if err := c.BindBody(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "invalid request"})
+	}
+
+	if strings.TrimSpace(req.Hostname) == "" {
+		return c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "hostname required"})
+	}
+
+	agentsCollection, err := app.FindCollectionByNameOrId("agents")
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "agents collection unavailable"})
+	}
+
+	agentRecord := core.NewRecord(agentsCollection)
+	agentRecord.Set("user_id", user.Id)
+	agentRecord.Set("hostname", req.Hostname)
+	agentRecord.Set("os_type", req.OSType)
+	agentRecord.Set("os_info", req.OSInfo)
+	agentRecord.Set("os_version", req.OSVersion)
+	agentRecord.Set("version", req.Version)
+	agentRecord.Set("status", string(types.AgentStatusActive))
+	agentRecord.Set("last_seen", time.Now())
+	agentRecord.Set("kernel_version", req.KernelVersion)
+	agentRecord.Set("arch", req.Arch)
+	agentRecord.Set("auth_method", "static_token")
+
+	// Resolve platform_family
+	platformFamily := req.PlatformFamily
+	if platformFamily == "" {
+		osInfoLower := strings.ToLower(req.OSInfo)
+		switch {
+		case strings.Contains(osInfoLower, "debian") || strings.Contains(osInfoLower, "ubuntu") || strings.Contains(osInfoLower, "mint") || strings.Contains(osInfoLower, "pop"):
+			platformFamily = "debian"
+		case strings.Contains(osInfoLower, "red hat") || strings.Contains(osInfoLower, "rhel") || strings.Contains(osInfoLower, "centos") || strings.Contains(osInfoLower, "fedora") || strings.Contains(osInfoLower, "alma") || strings.Contains(osInfoLower, "rocky") || strings.Contains(osInfoLower, "amazon"):
+			platformFamily = "rhel"
+		case strings.Contains(osInfoLower, "suse") || strings.Contains(osInfoLower, "sles"):
+			platformFamily = "suse"
+		case strings.Contains(osInfoLower, "arch") || strings.Contains(osInfoLower, "manjaro"):
+			platformFamily = "arch"
+		case strings.Contains(osInfoLower, "alpine"):
+			platformFamily = "alpine"
+		case req.OSType == "darwin":
+			platformFamily = "darwin"
+		case req.OSType == "windows":
+			platformFamily = "windows"
+		default:
+			platformFamily = "unknown"
+		}
+	}
+	agentRecord.Set("platform_family", platformFamily)
+
+	// Random password for Auth collection requirements.
+	password, err := generateRandomPassword(32)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to generate password"})
+	}
+	agentRecord.SetPassword(password)
+
+	if req.PrimaryIP != "" {
+		agentRecord.Set("primary_ip", req.PrimaryIP)
+	}
+	if len(req.AllIPs) > 0 {
+		ipsJSON, _ := json.Marshal(req.AllIPs)
+		agentRecord.Set("all_ips", string(ipsJSON))
+	}
+
+	// Explicitly do NOT set: device_code_id, device_user_code,
+	// refresh_token_hash, refresh_token_expires — those are for the
+	// device-code OAuth flow only.
+
+	if err := app.Save(agentRecord); err != nil {
+		app.Logger().Error("Failed to save agent via static token", "error", err)
+		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to create agent: " + err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, types.RegisterWithStaticTokenResponse{
+		AgentID: agentRecord.Id,
+		Message: "agent registered via static token",
+	})
 }
 
 type staticTokenError string
