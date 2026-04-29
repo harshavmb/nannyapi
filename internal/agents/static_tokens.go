@@ -3,7 +3,6 @@ package agents
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -273,6 +272,10 @@ func HandleRegisterWithStaticToken(app core.App, c *core.RequestEvent) error {
 		return c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "hostname required"})
 	}
 
+	if strings.TrimSpace(req.Version) == "" {
+		return c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "version required"})
+	}
+
 	agentsCollection, err := app.FindCollectionByNameOrId("agents")
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "agents collection unavailable"})
@@ -327,8 +330,7 @@ func HandleRegisterWithStaticToken(app core.App, c *core.RequestEvent) error {
 		agentRecord.Set("primary_ip", req.PrimaryIP)
 	}
 	if len(req.AllIPs) > 0 {
-		ipsJSON, _ := json.Marshal(req.AllIPs)
-		agentRecord.Set("all_ips", string(ipsJSON))
+		agentRecord.Set("all_ips", req.AllIPs)
 	}
 
 	// Explicitly do NOT set: device_code_id, device_user_code,
@@ -337,7 +339,7 @@ func HandleRegisterWithStaticToken(app core.App, c *core.RequestEvent) error {
 
 	if err := app.Save(agentRecord); err != nil {
 		app.Logger().Error("Failed to save agent via static token", "error", err)
-		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to create agent: " + err.Error()})
+		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to create agent"})
 	}
 
 	return c.JSON(http.StatusOK, types.RegisterWithStaticTokenResponse{

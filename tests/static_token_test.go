@@ -525,7 +525,10 @@ func TestRegisterWithStaticTokenRequiresStaticToken(t *testing.T) {
 	defer app.Cleanup()
 
 	user := createTestUser(app, t, fmt.Sprintf("rwtr_%d@example.com", time.Now().UnixNano()), "TestPass123!")
-	userToken, _ := user.NewAuthToken()
+	userToken, err := user.NewAuthToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Using a regular user JWT should be rejected.
 	rec := postAgent(t, mux, map[string]any{
@@ -565,5 +568,20 @@ func TestRegisterWithStaticTokenValidation(t *testing.T) {
 	}, staticHdr)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for missing hostname, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "hostname required") {
+		t.Fatalf("expected 'hostname required' error, got: %s", rec.Body.String())
+	}
+
+	// Missing version should fail.
+	rec = postAgent(t, mux, map[string]any{
+		"action":   "register-with-token",
+		"hostname": "test-host",
+	}, staticHdr)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing version, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "version required") {
+		t.Fatalf("expected 'version required' error, got: %s", rec.Body.String())
 	}
 }
