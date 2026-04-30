@@ -202,10 +202,10 @@ func HandleRegister(app core.App, c *core.RequestEvent) error {
 	agentRecord.Set("refresh_token_expires", time.Now().Add(30*24*time.Hour))
 
 	if err := app.Save(agentRecord); err != nil {
-		// Check if this is a pricing/rate-limit error from hooks
+		// Propagate structured pricing/rate-limit errors from hooks
 		var apiErr *router.ApiError
 		if errors.As(err, &apiErr) {
-			return c.JSON(apiErr.Status, types.ErrorResponse{Error: apiErr.Message})
+			return apiErr
 		}
 		app.Logger().Error("Failed to save agent", "error", err)
 		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to create agent: " + err.Error()})

@@ -91,7 +91,12 @@ func (m *Manager) GetPublicInfo() *types.PricingPublicInfo {
 	}
 
 	info := &types.PricingPublicInfo{}
-	for _, tier := range m.config.Tiers {
+	// Append tiers in a deterministic order: free first, then pro
+	for _, tierName := range []types.TierType{types.TierFree, types.TierPro} {
+		tier, ok := m.config.Tiers[tierName]
+		if !ok {
+			continue
+		}
 		info.Tiers = append(info.Tiers, types.PricingPublicTier{
 			Name:                      string(tier.Name),
 			MaxAgents:                 tier.MaxAgents,
@@ -286,7 +291,8 @@ func (m *Manager) CheckInvestigationLimit(userID string) *types.UsageLimitError 
 	return nil
 }
 
-// RecordTokenUsage records token usage for a user
+// RecordTokenUsage records token usage for a user.
+// Uses a fresh read to avoid lost updates under concurrency.
 func (m *Manager) RecordTokenUsage(userID string, tokens int64) error {
 	if !m.IsEnabled() {
 		return nil
@@ -300,18 +306,20 @@ func (m *Manager) RecordTokenUsage(userID string, tokens int64) error {
 		return err
 	}
 
+	// Re-read from DB to get latest values and avoid lost increments
 	record, err := m.app.FindRecordById(collection, usage.ID)
 	if err != nil {
 		return err
 	}
 
-	record.Set("daily_tokens_used", usage.DailyTokensUsed+tokens)
-	record.Set("monthly_tokens_used", usage.MonthlyTokensUsed+tokens)
+	record.Set("daily_tokens_used", record.GetInt("daily_tokens_used")+int(tokens))
+	record.Set("monthly_tokens_used", record.GetInt("monthly_tokens_used")+int(tokens))
 
 	return m.app.Save(record)
 }
 
-// RecordInvestigationUsage records investigation usage for a user
+// RecordInvestigationUsage records investigation usage for a user.
+// Uses a fresh read to avoid lost updates under concurrency.
 func (m *Manager) RecordInvestigationUsage(userID string) error {
 	if !m.IsEnabled() {
 		return nil
@@ -325,13 +333,14 @@ func (m *Manager) RecordInvestigationUsage(userID string) error {
 		return err
 	}
 
+	// Re-read from DB to get latest values and avoid lost increments
 	record, err := m.app.FindRecordById(collection, usage.ID)
 	if err != nil {
 		return err
 	}
 
-	record.Set("daily_investigations_used", usage.DailyInvestigationsUsed+1)
-	record.Set("monthly_investigations_used", usage.MonthlyInvestigationsUsed+1)
+	record.Set("daily_investigations_used", record.GetInt("daily_investigations_used")+1)
+	record.Set("monthly_investigations_used", record.GetInt("monthly_investigations_used")+1)
 
 	return m.app.Save(record)
 }
@@ -359,11 +368,22 @@ func (m *Manager) GetUserUsageInfo(userID string) *types.UserTierInfo {
 	}
 }
 
-// PromoteUserTier promotes a user to a tier (optionally for a limited duration)
+// PromoteUserTier promotes a user to a tier (optionally for a limited duration).
+// Deactivates any existing active overrides before creating the new one.
 func (m *Manager) PromoteUserTier(adminID, userID string, tier types.TierType, durationDays int, reason string) error {
 	collection, err := m.app.FindCollectionByNameOrId("tier_overrides")
 	if err != nil {
 		return fmt.Errorf("tier_overrides collection not found: %w", err)
+	}
+
+	// Deactivate any existing active overrides to enforce single-active invariant
+	existing, _ := m.app.FindRecordsByFilter(collection,
+		"user_id = {:userId} && active = true",
+		"", 0, 0,
+		map[string]any{"userId": userID})
+	for _, r := range existing {
+		r.Set("active", false)
+		_ = m.app.Save(r)
 	}
 
 	record := core.NewRecord(collection)
@@ -382,7 +402,7 @@ func (m *Manager) PromoteUserTier(adminID, userID string, tier types.TierType, d
 		return err
 	}
 
-	// Always sync users.tier field so it's visible in the admin dashboard
+	// Sync users.tier field for admin dashboard visibility
 	user, err := m.app.FindRecordById("users", userID)
 	if err == nil {
 		user.Set("tier", string(tier))

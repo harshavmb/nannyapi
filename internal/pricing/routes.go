@@ -36,7 +36,10 @@ func RegisterRoutes(app core.App, e *core.ServeEvent, mgr *Manager, withAuth fun
 
 		userID := c.Auth.Id
 		info := mgr.GetUserUsageInfo(userID)
-		return c.JSON(http.StatusOK, info)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"enabled": true,
+			"usage":   info,
+		})
 	}))
 
 	// Admin: POST /api/admin/pricing/promote - promote user tier
@@ -167,22 +170,12 @@ func RegisterRoutes(app core.App, e *core.ServeEvent, mgr *Manager, withAuth fun
 	}))
 }
 
-// isSuperuser checks if the authenticated user is a PocketBase superuser
+// isSuperuser checks if the authenticated user is a PocketBase superuser.
+// Only trusts the _superusers collection to prevent privilege escalation.
 func isSuperuser(app core.App, c *core.RequestEvent) bool {
 	if c.Auth == nil {
 		return false
 	}
 
-	// Check if auth record is from _superusers collection
-	if c.Auth.Collection().Name == "_superusers" {
-		return true
-	}
-
-	// Also check if user has admin role field
-	if c.Auth.Collection().Name == "users" {
-		role := c.Auth.GetString("role")
-		return role == "admin"
-	}
-
-	return false
+	return c.Auth.Collection().Name == "_superusers"
 }

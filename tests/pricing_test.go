@@ -582,10 +582,9 @@ func TestUsageResetMidnight(t *testing.T) {
 		t.Errorf("Expected daily investigations reset to 0, got %d", info.DailyInvestigationsUsed)
 	}
 
-	// Monthly should NOT be reset
+	// Monthly should NOT be reset (only daily was expired)
 	if info.MonthlyTokensUsed == 0 {
-		// This is acceptable if monthly was also expired, but let's verify
-		// the logic is correct by checking the monthly wasn't touched
+		t.Error("Expected monthly tokens to NOT be reset when only daily expired")
 	}
 }
 
