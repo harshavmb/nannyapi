@@ -7,6 +7,9 @@ node_modules
 # Environment files
 .env*
 
+# Pricing config (real values - use pricing.config.example.json as template)
+pricing.config.json
+
 # Logs
 *.log
 

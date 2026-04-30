@@ -1,0 +1,25 @@
+{
+  "enabled": true,
+  "tiers": {
+    "free": {
+      "name": "free",
+      "max_agents": 2,
+      "daily_token_limit": 200000,
+      "monthly_token_limit": 1000000,
+      "daily_investigation_limit": 5,
+      "monthly_investigation_limit": 25,
+      "price_per_month": 0,
+      "contact_email": "support@nannyai.dev"
+    },
+    "pro": {
+      "name": "pro",
+      "max_agents": -1,
+      "daily_token_limit": -1,
+      "monthly_token_limit": 10000000,
+      "daily_investigation_limit": -1,
+      "monthly_investigation_limit": -1,
+      "price_per_month": 10,
+      "contact_email": "support@nannyai.dev"
+    }
+  }
+}
