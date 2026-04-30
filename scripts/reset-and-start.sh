@@ -25,5 +25,5 @@ echo "Creating default admin..."
 ./nannyapi superuser upsert admin@nannyapi.local AdminPass-123 --dir=./pb_data
 
 echo "Setup complete. Admin: admin@nannyapi.local / AdminPass-123"
-echo "Starting server..."
-./nannyapi serve --dir=./pb_data --http="0.0.0.0:8090"
+echo "Starting server with NANNYAPI_PRICING_CONFIG..."
+NANNYAPI_PRICING_CONFIG="./pricing.config.json" ./nannyapi serve --dir=./pb_data --http="0.0.0.0:8090"

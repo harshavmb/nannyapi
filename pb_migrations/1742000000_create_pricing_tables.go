@@ -76,6 +76,9 @@ func init() {
 				Required: false,
 			})
 
+			tierOverrides.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+			tierOverrides.Fields.Add(&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true})
+
 			if err := app.Save(tierOverrides); err != nil {
 				return err
 			}
@@ -179,6 +182,9 @@ func init() {
 				Required: true,
 			})
 
+			userUsage.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+			userUsage.Fields.Add(&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true})
+
 			if err := app.Save(userUsage); err != nil {
 				return err
 			}
@@ -213,6 +219,19 @@ func init() {
 				_ = app.Delete(col)
 			}
 		}
+
+		// Remove the tier field from users collection
+		usersCollection, err := app.FindCollectionByNameOrId("users")
+		if err != nil {
+			return err
+		}
+		if usersCollection.Fields.GetByName("tier") != nil {
+			usersCollection.Fields.RemoveByName("tier")
+			if err := app.Save(usersCollection); err != nil {
+				return err
+			}
+		}
+
 		return nil
 	})
 }

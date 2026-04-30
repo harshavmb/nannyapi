@@ -292,7 +292,7 @@ func (m *Manager) CheckInvestigationLimit(userID string) *types.UsageLimitError 
 }
 
 // RecordTokenUsage records token usage for a user.
-// Uses a fresh read to avoid lost updates under concurrency.
+// Uses per-user locking and a fresh read to avoid lost updates under concurrency.
 func (m *Manager) RecordTokenUsage(userID string, tokens int64) error {
 	if !m.IsEnabled() {
 		return nil
@@ -301,12 +301,22 @@ func (m *Manager) RecordTokenUsage(userID string, tokens int64) error {
 	usage := m.getOrCreateUsage(userID)
 	m.resetUsageIfNeeded(usage)
 
+	if usage.ID == "" {
+		return fmt.Errorf("no usage record for user %s", userID)
+	}
+
 	collection, err := m.app.FindCollectionByNameOrId("user_usage")
 	if err != nil {
 		return err
 	}
 
-	// Re-read from DB to get latest values and avoid lost increments
+	// Lock per-user to prevent lost increments in read-modify-write
+	lock, _ := userUsageLocks.LoadOrStore(userID, &sync.Mutex{})
+	mu := lock.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Fresh read from DB under lock
 	record, err := m.app.FindRecordById(collection, usage.ID)
 	if err != nil {
 		return err
@@ -319,7 +329,7 @@ func (m *Manager) RecordTokenUsage(userID string, tokens int64) error {
 }
 
 // RecordInvestigationUsage records investigation usage for a user.
-// Uses a fresh read to avoid lost updates under concurrency.
+// Uses per-user locking and a fresh read to avoid lost updates under concurrency.
 func (m *Manager) RecordInvestigationUsage(userID string) error {
 	if !m.IsEnabled() {
 		return nil
@@ -328,12 +338,22 @@ func (m *Manager) RecordInvestigationUsage(userID string) error {
 	usage := m.getOrCreateUsage(userID)
 	m.resetUsageIfNeeded(usage)
 
+	if usage.ID == "" {
+		return fmt.Errorf("no usage record for user %s", userID)
+	}
+
 	collection, err := m.app.FindCollectionByNameOrId("user_usage")
 	if err != nil {
 		return err
 	}
 
-	// Re-read from DB to get latest values and avoid lost increments
+	// Lock per-user to prevent lost increments in read-modify-write
+	lock, _ := userUsageLocks.LoadOrStore(userID, &sync.Mutex{})
+	mu := lock.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Fresh read from DB under lock
 	record, err := m.app.FindRecordById(collection, usage.ID)
 	if err != nil {
 		return err
@@ -596,14 +616,16 @@ func (m *Manager) getUserLimitOverrides(userID string) (*types.TierConfig, error
 
 	record := records[0]
 
-	// Only return if at least one field is set
+	// Use -1 as the "not set" sentinel. Values >= 0 are valid overrides
+	// (including 0 which means "block this resource").
 	maxAgents := record.GetInt("max_agents")
 	dailyTokens := record.GetInt("daily_token_limit")
 	monthlyTokens := record.GetInt("monthly_token_limit")
 	dailyInv := record.GetInt("daily_investigation_limit")
 	monthlyInv := record.GetInt("monthly_investigation_limit")
 
-	if maxAgents == 0 && dailyTokens == 0 && monthlyTokens == 0 && dailyInv == 0 && monthlyInv == 0 {
+	// If all fields are at the "not configured" sentinel (-1), no overrides apply
+	if maxAgents == -1 && dailyTokens == -1 && monthlyTokens == -1 && dailyInv == -1 && monthlyInv == -1 {
 		return nil, fmt.Errorf("no overrides set")
 	}
 
@@ -617,31 +639,46 @@ func (m *Manager) getUserLimitOverrides(userID string) (*types.TierConfig, error
 		baseCfg = types.TierConfig{Name: tier}
 	}
 
-	if maxAgents != 0 {
+	if maxAgents != -1 {
 		baseCfg.MaxAgents = maxAgents
 	}
-	if dailyTokens != 0 {
+	if dailyTokens != -1 {
 		baseCfg.DailyTokenLimit = int64(dailyTokens)
 	}
-	if monthlyTokens != 0 {
+	if monthlyTokens != -1 {
 		baseCfg.MonthlyTokenLimit = int64(monthlyTokens)
 	}
-	if dailyInv != 0 {
+	if dailyInv != -1 {
 		baseCfg.DailyInvestigationLimit = dailyInv
 	}
-	if monthlyInv != 0 {
+	if monthlyInv != -1 {
 		baseCfg.MonthlyInvestigationLimit = monthlyInv
 	}
 
 	return &baseCfg, nil
 }
 
+// userUsageLocks provides per-user locking to prevent duplicate usage record creation.
+var userUsageLocks sync.Map
+
+func withUserUsageLock(userID string, fn func() *types.UserUsage) *types.UserUsage {
+	lock, _ := userUsageLocks.LoadOrStore(userID, &sync.Mutex{})
+	mu := lock.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+	return fn()
+}
+
 func (m *Manager) getOrCreateUsage(userID string) *types.UserUsage {
+	dailyResetAt := nextMidnight()
+	monthlyResetAt := nextMonthStart()
+
 	collection, err := m.app.FindCollectionByNameOrId("user_usage")
 	if err != nil {
-		return &types.UserUsage{UserID: userID, DailyResetAt: nextMidnight(), MonthlyResetAt: nextMonthStart()}
+		return &types.UserUsage{UserID: userID, DailyResetAt: dailyResetAt, MonthlyResetAt: monthlyResetAt}
 	}
 
+	// Fast path: record already exists
 	records, err := m.app.FindRecordsByFilter(collection,
 		"user_id = {:userId}",
 		"", 1, 0,
@@ -661,26 +698,49 @@ func (m *Manager) getOrCreateUsage(userID string) *types.UserUsage {
 		}
 	}
 
-	// Create new usage record
-	record := core.NewRecord(collection)
-	record.Set("user_id", userID)
-	record.Set("daily_tokens_used", 0)
-	record.Set("monthly_tokens_used", 0)
-	record.Set("daily_investigations_used", 0)
-	record.Set("monthly_investigations_used", 0)
-	record.Set("daily_reset_at", nextMidnight())
-	record.Set("monthly_reset_at", nextMonthStart())
+	// Slow path: create with per-user lock to prevent duplicates
+	return withUserUsageLock(userID, func() *types.UserUsage {
+		// Re-check after acquiring lock (another goroutine may have created it)
+		records, err := m.app.FindRecordsByFilter(collection,
+			"user_id = {:userId}",
+			"", 1, 0,
+			map[string]any{"userId": userID})
 
-	if err := m.app.Save(record); err != nil {
-		return &types.UserUsage{UserID: userID, DailyResetAt: nextMidnight(), MonthlyResetAt: nextMonthStart()}
-	}
+		if err == nil && len(records) > 0 {
+			record := records[0]
+			return &types.UserUsage{
+				ID:                        record.Id,
+				UserID:                    userID,
+				DailyTokensUsed:           int64(record.GetInt("daily_tokens_used")),
+				MonthlyTokensUsed:         int64(record.GetInt("monthly_tokens_used")),
+				DailyInvestigationsUsed:   record.GetInt("daily_investigations_used"),
+				MonthlyInvestigationsUsed: record.GetInt("monthly_investigations_used"),
+				DailyResetAt:              record.GetDateTime("daily_reset_at").Time(),
+				MonthlyResetAt:            record.GetDateTime("monthly_reset_at").Time(),
+			}
+		}
 
-	return &types.UserUsage{
-		ID:             record.Id,
-		UserID:         userID,
-		DailyResetAt:   nextMidnight(),
-		MonthlyResetAt: nextMonthStart(),
-	}
+		// Create new usage record
+		record := core.NewRecord(collection)
+		record.Set("user_id", userID)
+		record.Set("daily_tokens_used", 0)
+		record.Set("monthly_tokens_used", 0)
+		record.Set("daily_investigations_used", 0)
+		record.Set("monthly_investigations_used", 0)
+		record.Set("daily_reset_at", dailyResetAt)
+		record.Set("monthly_reset_at", monthlyResetAt)
+
+		if err := m.app.Save(record); err != nil {
+			return &types.UserUsage{UserID: userID, DailyResetAt: dailyResetAt, MonthlyResetAt: monthlyResetAt}
+		}
+
+		return &types.UserUsage{
+			ID:             record.Id,
+			UserID:         userID,
+			DailyResetAt:   dailyResetAt,
+			MonthlyResetAt: monthlyResetAt,
+		}
+	})
 }
 
 func (m *Manager) resetUsageIfNeeded(usage *types.UserUsage) {

@@ -2,9 +2,11 @@ package tests
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	_ "github.com/nannyagent/nannyapi/pb_migrations"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/router"
 )
 
 // setupPricingTestApp creates test app with pricing enabled
@@ -960,5 +963,350 @@ func TestUserTierFieldVisibleInDashboard(t *testing.T) {
 	}
 	if !foundPro {
 		t.Error("Pro user not found when filtering by tier='pro'")
+	}
+}
+
+// TestLimitOverrideZeroIsValid verifies that setting a limit to 0 actually blocks the resource
+// (0 means "block" not "use tier default"; -1 means "use tier default")
+func TestLimitOverrideZeroIsValid(t *testing.T) {
+	app, mgr := setupPricingTestApp(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, "zero-limit@test.com", "Password123!@#")
+
+	// Set max_agents to 0 (block agent registration)
+	intZero := 0
+	err := mgr.UpdateUserLimits(user.Id, types.AdminUpdateLimitsRequest{
+		UserID:    user.Id,
+		MaxAgents: &intZero,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserLimits failed: %v", err)
+	}
+
+	// Now CheckAgentLimit should fail even with 0 agents
+	limitErr := mgr.CheckAgentLimit(user.Id)
+	if limitErr == nil {
+		t.Error("Expected agent limit error when max_agents=0, got nil")
+	}
+	if limitErr != nil && limitErr.Limit != 0 {
+		t.Errorf("Expected limit=0, got %d", limitErr.Limit)
+	}
+}
+
+// TestLimitOverrideMinusOneIsNotSet verifies that -1 means "use tier default"
+func TestLimitOverrideMinusOneIsNotSet(t *testing.T) {
+	app, mgr := setupPricingTestApp(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, "default-limit@test.com", "Password123!@#")
+
+	// Set all fields to -1 (should be treated as "not configured")
+	minusOne := -1
+	minusOneInt64 := int64(-1)
+	err := mgr.UpdateUserLimits(user.Id, types.AdminUpdateLimitsRequest{
+		UserID:                    user.Id,
+		MaxAgents:                 &minusOne,
+		DailyTokenLimit:           &minusOneInt64,
+		MonthlyTokenLimit:         &minusOneInt64,
+		DailyInvestigationLimit:   &minusOne,
+		MonthlyInvestigationLimit: &minusOne,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserLimits failed: %v", err)
+	}
+
+	// Should fall through to tier defaults (free tier: max_agents=2)
+	limits := mgr.GetUserLimits(user.Id)
+	if limits.MaxAgents != 2 {
+		t.Errorf("Expected tier default max_agents=2, got %d", limits.MaxAgents)
+	}
+}
+
+// TestSingleActiveTierOverride verifies only one active override exists per user after promotion
+func TestSingleActiveTierOverride(t *testing.T) {
+	app, mgr := setupPricingTestApp(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, "single-override@test.com", "Password123!@#")
+	admin := createTestUser(app, t, "admin-single@test.com", "Password123!@#")
+
+	// Promote twice - second should deactivate the first
+	err := mgr.PromoteUserTier(admin.Id, user.Id, types.TierPro, 7, "first trial")
+	if err != nil {
+		t.Fatalf("First PromoteUserTier failed: %v", err)
+	}
+
+	err = mgr.PromoteUserTier(admin.Id, user.Id, types.TierPro, 30, "extended trial")
+	if err != nil {
+		t.Fatalf("Second PromoteUserTier failed: %v", err)
+	}
+
+	// Count active overrides for this user
+	collection, _ := app.FindCollectionByNameOrId("tier_overrides")
+	activeRecords, err := app.FindRecordsByFilter(collection,
+		"user_id = {:userId} && active = true",
+		"", 0, 0,
+		map[string]any{"userId": user.Id})
+	if err != nil {
+		t.Fatalf("Failed to query active overrides: %v", err)
+	}
+
+	if len(activeRecords) != 1 {
+		t.Errorf("Expected exactly 1 active override, got %d", len(activeRecords))
+	}
+
+	// The active one should be the second (extended trial)
+	if len(activeRecords) == 1 {
+		reason := activeRecords[0].GetString("reason")
+		if reason != "extended trial" {
+			t.Errorf("Expected active override reason='extended trial', got '%s'", reason)
+		}
+	}
+
+	// Verify total records (both old deactivated + new active)
+	allRecords, _ := app.FindRecordsByFilter(collection,
+		"user_id = {:userId}",
+		"", 0, 0,
+		map[string]any{"userId": user.Id})
+	if len(allRecords) < 2 {
+		t.Errorf("Expected at least 2 total override records (audit trail), got %d", len(allRecords))
+	}
+}
+
+// TestTierOverridesHaveTimestamps verifies tier_overrides records have created/updated fields
+func TestTierOverridesHaveTimestamps(t *testing.T) {
+	app, mgr := setupPricingTestApp(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, "timestamp-check@test.com", "Password123!@#")
+	admin := createTestUser(app, t, "admin-timestamp@test.com", "Password123!@#")
+
+	err := mgr.PromoteUserTier(admin.Id, user.Id, types.TierPro, 14, "timestamp test")
+	if err != nil {
+		t.Fatalf("PromoteUserTier failed: %v", err)
+	}
+
+	collection, _ := app.FindCollectionByNameOrId("tier_overrides")
+	records, _ := app.FindRecordsByFilter(collection,
+		"user_id = {:userId}",
+		"", 1, 0,
+		map[string]any{"userId": user.Id})
+
+	if len(records) == 0 {
+		t.Fatal("No tier_override record found")
+	}
+
+	record := records[0]
+
+	// PocketBase BaseCollection auto-manages 'created' and 'updated' fields
+	created := record.GetDateTime("created")
+	if created.IsZero() {
+		t.Error("Expected 'created' timestamp to be set on tier_overrides record")
+	}
+
+	updated := record.GetDateTime("updated")
+	if updated.IsZero() {
+		t.Error("Expected 'updated' timestamp to be set on tier_overrides record")
+	}
+}
+
+// TestGetPublicInfoDeterministicOrder verifies tiers are returned in stable order (free, pro)
+func TestGetPublicInfoDeterministicOrder(t *testing.T) {
+	app, mgr := setupPricingTestApp(t)
+	defer app.Cleanup()
+
+	// Call multiple times to verify consistency
+	for i := 0; i < 10; i++ {
+		info := mgr.GetPublicInfo()
+		if info == nil {
+			t.Fatal("Expected public info")
+		}
+		if len(info.Tiers) != 2 {
+			t.Fatalf("Expected 2 tiers, got %d", len(info.Tiers))
+		}
+		if info.Tiers[0].Name != "free" {
+			t.Errorf("Iteration %d: Expected first tier to be 'free', got '%s'", i, info.Tiers[0].Name)
+		}
+		if info.Tiers[1].Name != "pro" {
+			t.Errorf("Iteration %d: Expected second tier to be 'pro', got '%s'", i, info.Tiers[1].Name)
+		}
+	}
+}
+
+// TestConcurrentUsageCreation verifies no duplicate usage records under concurrent access
+func TestConcurrentUsageCreation(t *testing.T) {
+	app, mgr := setupPricingTestApp(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, "concurrent-usage@test.com", "Password123!@#")
+
+	// Simulate concurrent access by calling RecordTokenUsage in goroutines
+	done := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			done <- mgr.RecordTokenUsage(user.Id, 100)
+		}()
+	}
+
+	for i := 0; i < 10; i++ {
+		if err := <-done; err != nil {
+			t.Errorf("RecordTokenUsage error: %v", err)
+		}
+	}
+
+	// Verify only one usage record exists
+	usageCollection, _ := app.FindCollectionByNameOrId("user_usage")
+	records, _ := app.FindRecordsByFilter(usageCollection,
+		"user_id = {:userId}",
+		"", 0, 0,
+		map[string]any{"userId": user.Id})
+
+	if len(records) != 1 {
+		t.Errorf("Expected exactly 1 usage record, got %d (race condition!)", len(records))
+	}
+
+	// Total should be 1000 (10 goroutines * 100 tokens)
+	if len(records) == 1 {
+		total := records[0].GetInt("daily_tokens_used")
+		if total != 1000 {
+			t.Errorf("Expected daily_tokens_used=1000, got %d (lost writes!)", total)
+		}
+	}
+}
+
+// TestUserUsageUniqueIndex verifies the unique index prevents duplicate user_usage rows
+func TestUserUsageUniqueIndex(t *testing.T) {
+	app, mgr := setupPricingTestApp(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, "unique-usage@test.com", "Password123!@#")
+
+	// First usage call creates the record
+	_ = mgr.RecordTokenUsage(user.Id, 50)
+
+	// Second call should update (not create a new record)
+	_ = mgr.RecordTokenUsage(user.Id, 50)
+
+	usageCollection, _ := app.FindCollectionByNameOrId("user_usage")
+	records, _ := app.FindRecordsByFilter(usageCollection,
+		"user_id = {:userId}",
+		"", 0, 0,
+		map[string]any{"userId": user.Id})
+
+	if len(records) != 1 {
+		t.Errorf("Expected exactly 1 usage record, got %d", len(records))
+	}
+
+	if len(records) == 1 {
+		daily := records[0].GetInt("daily_tokens_used")
+		if daily != 100 {
+			t.Errorf("Expected daily_tokens_used=100, got %d", daily)
+		}
+	}
+}
+
+// TestAgentRegistrationBlockedAtLimit tests that the OnRecordCreate hook
+// blocks agent creation when the user has reached their agent limit, and
+// that the error is a structured ApiError the handler can return as JSON.
+func TestAgentRegistrationBlockedAtLimit(t *testing.T) {
+	app, _ := setupPricingTestApp(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, "agent-hook-block@test.com", "Password123!@#")
+
+	// Free tier allows 2 agents. Create 2.
+	a1 := createTestAgent(app, t, user.Id, "hook-agent-1")
+	a1.Set("status", "active")
+	_ = app.Save(a1)
+
+	a2 := createTestAgent(app, t, user.Id, "hook-agent-2")
+	a2.Set("status", "active")
+	_ = app.Save(a2)
+
+	// Attempt to create a 3rd agent — should be blocked by pricing hook
+	agentsCollection, err := app.FindCollectionByNameOrId("agents")
+	if err != nil {
+		t.Fatalf("agents collection not found: %v", err)
+	}
+
+	agentRecord := core.NewRecord(agentsCollection)
+	agentRecord.Set("user_id", user.Id)
+	agentRecord.Set("hostname", "hook-agent-3")
+	agentRecord.Set("os_type", "linux")
+	agentRecord.Set("platform_family", "debian")
+	agentRecord.Set("version", "1.0.0")
+	agentRecord.SetPassword("testpass123")
+
+	saveErr := app.Save(agentRecord)
+	if saveErr == nil {
+		t.Fatal("Expected save to fail due to agent limit, but it succeeded")
+	}
+
+	// The error should be a *router.ApiError with status 429
+	var apiErr *router.ApiError
+	if !errors.As(saveErr, &apiErr) {
+		t.Fatalf("Expected *router.ApiError, got %T: %v", saveErr, saveErr)
+	}
+
+	if apiErr.Status != 429 {
+		t.Errorf("Expected HTTP 429, got %d", apiErr.Status)
+	}
+
+	if apiErr.Message == "" {
+		t.Error("Expected non-empty error message")
+	}
+
+	// Verify the message mentions the agent limit
+	if !strings.Contains(apiErr.Message, "maximum number of agents") {
+		t.Errorf("Expected message about agent limit, got: %s", apiErr.Message)
+	}
+}
+
+// TestAgentRegistrationAllowedAfterPromotion tests that promoting a user to
+// pro lifts the agent limit and allows registration.
+func TestAgentRegistrationAllowedAfterPromotion(t *testing.T) {
+	app, mgr := setupPricingTestApp(t)
+	defer app.Cleanup()
+
+	user := createTestUser(app, t, "agent-promo@test.com", "Password123!@#")
+
+	// Fill free tier limit (2 agents)
+	a1 := createTestAgent(app, t, user.Id, "promo-agent-1")
+	a1.Set("status", "active")
+	_ = app.Save(a1)
+
+	a2 := createTestAgent(app, t, user.Id, "promo-agent-2")
+	a2.Set("status", "active")
+	_ = app.Save(a2)
+
+	// Confirm 3rd agent is blocked
+	if limitErr := mgr.CheckAgentLimit(user.Id); limitErr == nil {
+		t.Fatal("Expected agent limit error before promotion")
+	}
+
+	// Promote user to pro
+	adminID := "test-admin-id"
+	if err := mgr.PromoteUserTier(adminID, user.Id, types.TierPro, 14, "test promotion"); err != nil {
+		t.Fatalf("Failed to promote: %v", err)
+	}
+
+	// Now 3rd agent should be allowed
+	if limitErr := mgr.CheckAgentLimit(user.Id); limitErr != nil {
+		t.Errorf("Pro user should not have agent limit, got: %s", limitErr.Message)
+	}
+
+	// Actually create the 3rd agent to verify hook passes
+	agentsCollection, _ := app.FindCollectionByNameOrId("agents")
+	agentRecord := core.NewRecord(agentsCollection)
+	agentRecord.Set("user_id", user.Id)
+	agentRecord.Set("hostname", "promo-agent-3")
+	agentRecord.Set("os_type", "linux")
+	agentRecord.Set("platform_family", "debian")
+	agentRecord.Set("version", "1.0.0")
+	agentRecord.SetPassword("testpass123")
+
+	if err := app.Save(agentRecord); err != nil {
+		t.Errorf("Pro user should be able to create 3rd agent, got error: %v", err)
 	}
 }

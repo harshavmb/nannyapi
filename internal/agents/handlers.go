@@ -203,9 +203,10 @@ func HandleRegister(app core.App, c *core.RequestEvent) error {
 
 	if err := app.Save(agentRecord); err != nil {
 		// Propagate structured pricing/rate-limit errors from hooks
+		// Return in the agent client's expected format: {"error": "..."}
 		var apiErr *router.ApiError
 		if errors.As(err, &apiErr) {
-			return apiErr
+			return c.JSON(apiErr.Status, types.ErrorResponse{Error: apiErr.Message})
 		}
 		app.Logger().Error("Failed to save agent", "error", err)
 		return c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "failed to create agent: " + err.Error()})
