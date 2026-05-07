@@ -4,13 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pocketbase/pocketbase/core"
 	stripego "github.com/stripe/stripe-go/v85"
 )
 
 func TestInvoiceRecordToListItem_Basic(t *testing.T) {
-	// We can't easily construct a real PocketBase record without a running app,
-	// but we can test the sortInvoiceRecords logic and InvoiceListItem struct.
+	// Test the InvoiceListItem struct shape and field assignment.
 	item := InvoiceListItem{
 		ID:              "test123",
 		StripeInvoiceID: "in_abc",
@@ -51,23 +49,6 @@ func TestInvoiceListResponse_Pagination(t *testing.T) {
 	if len(resp.Items) != 2 {
 		t.Errorf("expected 2 items, got %d", len(resp.Items))
 	}
-}
-
-func TestSortInvoiceRecords_Empty(t *testing.T) {
-	// Should not panic on empty slice
-	var records []*core.Record
-	sortInvoiceRecords(records)
-	if len(records) != 0 {
-		t.Error("expected empty slice")
-	}
-}
-
-func TestSortInvoiceRecords_Single(t *testing.T) {
-	// Should not panic on single element
-	records := []*core.Record{nil}
-	// We can't call sortInvoiceRecords with nil records safely in production,
-	// but this tests that length-1 arrays don't enter the loop.
-	sortInvoiceRecords(records[:0]) // pass empty subslice
 }
 
 func TestGetInvoices_DefaultPagination(t *testing.T) {

@@ -88,44 +88,35 @@ func (m *Manager) GetInvoices(userID string, page, perPage int) (*InvoiceListRes
 		perPage = 10
 	}
 
-	// Count total
-	allRecords, err := m.app.FindAllRecords("stripe_invoices",
-		dbx.NewExp("user_id = {:uid}", dbx.Params{"uid": userID}),
-	)
+	// Count total matching records
+	filter := "user_id = {:uid}"
+	params := dbx.Params{"uid": userID}
+	totalItems, err := m.app.CountRecords("stripe_invoices", dbx.NewExp(filter, params))
 	if err != nil {
-		return &InvoiceListResponse{Items: []InvoiceListItem{}, Page: page, PerPage: perPage}, nil
+		return &InvoiceListResponse{Items: []InvoiceListItem{}, Page: page, PerPage: perPage, TotalPages: 1}, nil
 	}
 
-	totalItems := len(allRecords)
-	totalPages := (totalItems + perPage - 1) / perPage
+	totalPages := (int(totalItems) + perPage - 1) / perPage
 	if totalPages < 1 {
 		totalPages = 1
 	}
 
-	// Manual pagination with sorting (newest first)
-	// PocketBase FindAllRecords doesn't support LIMIT/OFFSET directly with
-	// filter expressions, so we sort and slice manually.
-	// Sort by invoice_created descending
-	sortInvoiceRecords(allRecords)
-
-	start := (page - 1) * perPage
-	if start >= totalItems {
-		return &InvoiceListResponse{
-			Items:      []InvoiceListItem{},
-			Page:       page,
-			PerPage:    perPage,
-			TotalItems: totalItems,
-			TotalPages: totalPages,
-		}, nil
+	// Fetch only the requested page, sorted newest-first
+	offset := (page - 1) * perPage
+	records, err := m.app.FindRecordsByFilter(
+		"stripe_invoices",
+		filter,
+		"-invoice_created",
+		perPage,
+		offset,
+		params,
+	)
+	if err != nil {
+		records = nil
 	}
-	end := start + perPage
-	if end > totalItems {
-		end = totalItems
-	}
-	pageRecords := allRecords[start:end]
 
-	items := make([]InvoiceListItem, 0, len(pageRecords))
-	for _, rec := range pageRecords {
+	items := make([]InvoiceListItem, 0, len(records))
+	for _, rec := range records {
 		items = append(items, invoiceRecordToListItem(rec))
 	}
 
@@ -133,7 +124,7 @@ func (m *Manager) GetInvoices(userID string, page, perPage int) (*InvoiceListRes
 		Items:      items,
 		Page:       page,
 		PerPage:    perPage,
-		TotalItems: totalItems,
+		TotalItems: int(totalItems),
 		TotalPages: totalPages,
 	}, nil
 }
@@ -230,21 +221,6 @@ func (m *Manager) upsertInvoice(col *core.Collection, userID string, invoice *st
 	rec.Set("hosted_invoice_url", invoice.HostedInvoiceURL)
 
 	return m.app.Save(rec)
-}
-
-// sortInvoiceRecords sorts records by invoice_created descending (newest first).
-func sortInvoiceRecords(records []*core.Record) {
-	for i := 1; i < len(records); i++ {
-		for j := i; j > 0; j-- {
-			a := records[j].GetDateTime("invoice_created")
-			b := records[j-1].GetDateTime("invoice_created")
-			if a.Time().After(b.Time()) {
-				records[j], records[j-1] = records[j-1], records[j]
-			} else {
-				break
-			}
-		}
-	}
 }
 
 // invoiceRecordToListItem maps a PocketBase record to the API response shape.
