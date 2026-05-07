@@ -153,7 +153,7 @@ func (m *Manager) GetInvoicePDFURL(userID, invoiceRecordID string) (string, erro
 		}),
 	)
 	if err != nil || len(records) == 0 {
-		return "", fmt.Errorf("stripe: invoice not found")
+		return "", ErrInvoiceNotFound
 	}
 
 	stripeInvoiceID := records[0].GetString("stripe_invoice_id")

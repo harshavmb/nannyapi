@@ -245,7 +245,7 @@ func TestStripeManager_GetInvoices_Pagination(t *testing.T) {
 		rec.Set("currency", "eur")
 		rec.Set("amount_due", 1000+i)
 		rec.Set("amount_paid", 1000+i)
-		rec.Set("invoice_created", "2026-04-01 00:00:00.000Z")
+		rec.Set("invoice_created", "2026-04-01T00:00:00Z")
 		if err := app.Save(rec); err != nil {
 			t.Fatalf("failed to seed invoice %d: %v", i, err)
 		}
@@ -326,7 +326,7 @@ func TestStripeManager_GetInvoicePDFURL_WrongUser(t *testing.T) {
 	rec.Set("currency", "eur")
 	rec.Set("amount_due", 1000)
 	rec.Set("amount_paid", 1000)
-	rec.Set("invoice_created", "2026-04-01 00:00:00.000Z")
+	rec.Set("invoice_created", "2026-04-01T00:00:00Z")
 	if err := app.Save(rec); err != nil {
 		t.Fatalf("failed to seed invoice: %v", err)
 	}

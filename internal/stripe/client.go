@@ -28,6 +28,10 @@ var ErrNotConfigured = errors.New("stripe: payment integration is not configured
 // while already having an active subscription.
 var ErrActiveSubscriptionExists = errors.New("stripe: an active subscription already exists; cancel it first or buy extra credits instead")
 
+// ErrInvoiceNotFound is returned when an invoice record cannot be found
+// for the given user.
+var ErrInvoiceNotFound = errors.New("stripe: invoice not found")
+
 // retryConfig holds exponential-backoff parameters.
 type retryConfig struct {
 	maxAttempts int
@@ -118,4 +122,32 @@ func creditBundleTokens() int64 {
 		return defaultCreditBundleTokens
 	}
 	return cfg.CreditBundleTokens
+}
+
+// defaultProMonthlyTokenLimit is the fallback Pro tier monthly token limit.
+const defaultProMonthlyTokenLimit int64 = 10_000_000
+
+// proMonthlyTokenLimit reads the Pro tier's monthly_token_limit from
+// pricing.config.json. Falls back to 10,000,000 if unavailable.
+func proMonthlyTokenLimit() int64 {
+	configPath := os.Getenv("NANNYAPI_PRICING_CONFIG")
+	if configPath == "" {
+		configPath = "pricing.config.json"
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return defaultProMonthlyTokenLimit
+	}
+	var cfg struct {
+		Tiers map[string]struct {
+			MonthlyTokenLimit int64 `json:"monthly_token_limit"`
+		} `json:"tiers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return defaultProMonthlyTokenLimit
+	}
+	if pro, ok := cfg.Tiers["pro"]; ok && pro.MonthlyTokenLimit > 0 {
+		return pro.MonthlyTokenLimit
+	}
+	return defaultProMonthlyTokenLimit
 }

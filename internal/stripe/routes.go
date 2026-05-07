@@ -227,7 +227,7 @@ func RegisterRoutes(
 
 		pdfURL, err := mgr.GetInvoicePDFURL(userID, invoiceID)
 		if err != nil {
-			if err.Error() == "stripe: invoice not found" {
+			if errors.Is(err, ErrInvoiceNotFound) {
 				return c.JSON(http.StatusNotFound, types.ErrorResponse{Error: "invoice not found"})
 			}
 			return c.JSON(http.StatusInternalServerError, types.ErrorResponse{

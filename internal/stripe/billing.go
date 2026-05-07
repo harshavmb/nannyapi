@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"time"
 
@@ -170,7 +171,7 @@ func SeedProductCatalog(app core.App) error {
 			Description:       "Pro tier subscription with 10M monthly tokens and unlimited agents/investigations",
 			Type:              "subscription",
 			Currency:          currency,
-			Amount:            int64(pro.PricePerMonth * 100), // convert to cents
+			Amount:            int64(math.Round(pro.PricePerMonth * 100)), // convert to cents
 			Interval:          "month",
 			TokensPerUnit:     0,
 			Provider:          "stripe",
@@ -189,7 +190,7 @@ func SeedProductCatalog(app core.App) error {
 			Description:       fmt.Sprintf("%d additional tokens", cfg.CreditBundleTokens),
 			Type:              "one_time",
 			Currency:          currency,
-			Amount:            int64(cfg.CreditBundlePrice * 100),
+			Amount:            int64(math.Round(cfg.CreditBundlePrice * 100)),
 			Interval:          "one_time",
 			TokensPerUnit:     cfg.CreditBundleTokens,
 			Provider:          "stripe",

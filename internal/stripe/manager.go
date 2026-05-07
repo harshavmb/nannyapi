@@ -441,7 +441,8 @@ func (m *Manager) HandleCheckoutSessionCompleted(session *stripego.CheckoutSessi
 
 	case stripego.CheckoutSessionModePayment:
 		// Credit purchase: grant additional tokens to the user
-		if err := m.grantCreditTokens(userID, session); err != nil {
+		quantity, err := m.grantCreditTokens(userID, session)
+		if err != nil {
 			return err
 		}
 
@@ -461,7 +462,7 @@ func (m *Manager) HandleCheckoutSessionCompleted(session *stripego.CheckoutSessi
 			Currency:              pricingCurrency(),
 			Amount:                session.AmountTotal,
 			Description:           "Token credit bundle purchased",
-			Quantity:              1,
+			Quantity:              quantity,
 			ProductSlug:           "credit_bundle",
 			Provider:              "stripe",
 			ProviderTransactionID: paymentIntentID,
@@ -767,7 +768,7 @@ func (m *Manager) setUserTier(userID string, tier types.TierType) error {
 // grantCreditTokens processes a successful one-time payment for extra
 // token bundles.  The bundle size is read from pricing.config.json
 // (credit_bundle_tokens field); defaults to 1,000,000 if not configured.
-func (m *Manager) grantCreditTokens(userID string, session *stripego.CheckoutSession) error {
+func (m *Manager) grantCreditTokens(userID string, session *stripego.CheckoutSession) (int64, error) {
 	// Retrieve line items to get quantity.
 	// V1CheckoutSessions.ListLineItems returns a *V1List; we fetch the first
 	// page only (checkout sessions have at most a few line items).
@@ -778,27 +779,30 @@ func (m *Manager) grantCreditTokens(userID string, session *stripego.CheckoutSes
 	var items []*stripego.LineItem
 	for item, err := range lineItemList.All(ctx) {
 		if err != nil {
-			return fmt.Errorf("stripe: list checkout line items: %w", err)
+			return 0, fmt.Errorf("stripe: list checkout line items: %w", err)
 		}
 		items = append(items, item)
 	}
 
 	bundleSize := creditBundleTokens()
+	var totalQuantity int64
 	var totalTokens int64
 	for _, item := range items {
+		totalQuantity += item.Quantity
 		totalTokens += item.Quantity * bundleSize
 	}
 	if totalTokens == 0 {
-		return nil
+		return totalQuantity, nil
 	}
 
 	log.Printf("[stripe] granting %d extra tokens to user %s", totalTokens, userID)
-	return m.addMonthlyTokens(userID, totalTokens)
+	return totalQuantity, m.addMonthlyTokens(userID, totalTokens)
 }
 
 // addMonthlyTokens increments the user's monthly token limit override.
-// It adds to any existing override; if none exists, it sets the base to
-// the configured tier limit + extra.
+// It adds to any existing override; if none exists, it sets the value to
+// the Pro tier base limit + extra so the override (which is absolute)
+// doesn't accidentally lower the user's allowance.
 func (m *Manager) addMonthlyTokens(userID string, extra int64) error {
 	records, _ := m.app.FindAllRecords("user_limit_overrides",
 		dbx.NewExp("user_id = {:uid}", dbx.Params{"uid": userID}),
@@ -811,14 +815,15 @@ func (m *Manager) addMonthlyTokens(userID string, extra int64) error {
 		return m.app.Save(rec)
 	}
 
-	// Create a new override starting from the current limit + extra
+	// Create a new override: base tier limit + purchased extra
+	baseLimit := proMonthlyTokenLimit()
 	col, err := m.app.FindCollectionByNameOrId("user_limit_overrides")
 	if err != nil {
 		return err
 	}
 	rec := core.NewRecord(col)
 	rec.Set("user_id", userID)
-	rec.Set("monthly_token_limit", extra)
+	rec.Set("monthly_token_limit", baseLimit+extra)
 	return m.app.Save(rec)
 }
 

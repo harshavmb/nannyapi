@@ -262,11 +262,11 @@ func TestStripeE2E_FullSubscriptionLifecycle(t *testing.T) {
 			t.Fatal("expected user_limit_overrides record after credit purchase")
 		}
 		monthlyTokens := records[0].GetInt("monthly_token_limit")
-		expectedTokens := int64(2_000_000) // 2 bundles * 1M tokens
+		expectedTokens := int64(12_000_000) // Pro base 10M + 2 bundles * 1M tokens
 		if int64(monthlyTokens) != expectedTokens {
 			t.Errorf("expected monthly_token_limit=%d, got %d", expectedTokens, monthlyTokens)
 		}
-		t.Logf("User now has %d extra monthly tokens", monthlyTokens)
+		t.Logf("User monthly_token_limit override is now %d", monthlyTokens)
 	})
 
 	// ---- Step 6: Verify quantity validation ----
@@ -544,13 +544,15 @@ func simulateCreditGrant(t *testing.T, app core.App, userID string, bundles int6
 			t.Fatalf("failed to update token override: %v", err)
 		}
 	} else {
+		// Mirror addMonthlyTokens: use Pro base limit + purchased extra
+		baseLimit := int64(10_000_000)
 		col, err := app.FindCollectionByNameOrId("user_limit_overrides")
 		if err != nil {
 			t.Fatalf("user_limit_overrides collection not found: %v", err)
 		}
 		rec := core.NewRecord(col)
 		rec.Set("user_id", userID)
-		rec.Set("monthly_token_limit", tokensToAdd)
+		rec.Set("monthly_token_limit", baseLimit+tokensToAdd)
 		if err := app.Save(rec); err != nil {
 			t.Fatalf("failed to create token override: %v", err)
 		}

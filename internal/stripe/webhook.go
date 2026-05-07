@@ -63,10 +63,12 @@ func HandleWebhook(app core.App, mgr *Manager) func(*core.RequestEvent) error {
 		log.Printf("[stripe] webhook event: %s (id=%s)", event.Type, event.ID)
 
 		if err := dispatchEvent(mgr, &event); err != nil {
-			// Log but return 200 so Stripe does not retry endlessly for
-			// application-level errors (e.g. DB transient failure).
-			// Stripe only needs a non-2xx to trigger a retry.
+			// Return 500 so Stripe retries transient processing failures
+			// (e.g. temporary DB or network outages).
 			log.Printf("[stripe] webhook: error handling %s: %v", event.Type, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": "failed to process webhook event",
+			})
 		}
 
 		return c.JSON(http.StatusOK, map[string]string{"received": "true"})
