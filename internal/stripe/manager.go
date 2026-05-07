@@ -408,11 +408,67 @@ func (m *Manager) HandleCheckoutSessionCompleted(session *stripego.CheckoutSessi
 		} else {
 			return errors.New("stripe: subscription ID missing from checkout session")
 		}
-		return m.upsertLocalSubscription(userID, stripeSub)
+
+		if err := m.upsertLocalSubscription(userID, stripeSub); err != nil {
+			return err
+		}
+
+		// Record transaction
+		customerID := ""
+		if stripeSub.Customer != nil {
+			customerID = stripeSub.Customer.ID
+		}
+		paymentIntentID := ""
+		if session.PaymentIntent != nil {
+			paymentIntentID = session.PaymentIntent.ID
+		}
+		_ = m.recordTransaction(billingTransaction{
+			UserID:                 userID,
+			Type:                   TxTypeSubscriptionCreated,
+			Status:                 TxStatusSucceeded,
+			Currency:               pricingCurrency(),
+			Amount:                 session.AmountTotal,
+			Description:            "Pro subscription created",
+			Quantity:               1,
+			ProductSlug:            "pro_subscription",
+			Provider:               "stripe",
+			ProviderTransactionID:  paymentIntentID,
+			ProviderSubscriptionID: stripeSub.ID,
+			ProviderCustomerID:     customerID,
+			CustomerEmail:          m.getUserEmail(userID),
+		})
+		return nil
 
 	case stripego.CheckoutSessionModePayment:
 		// Credit purchase: grant additional tokens to the user
-		return m.grantCreditTokens(userID, session)
+		if err := m.grantCreditTokens(userID, session); err != nil {
+			return err
+		}
+
+		// Record credit purchase transaction
+		customerID := ""
+		if session.Customer != nil {
+			customerID = session.Customer.ID
+		}
+		paymentIntentID := ""
+		if session.PaymentIntent != nil {
+			paymentIntentID = session.PaymentIntent.ID
+		}
+		_ = m.recordTransaction(billingTransaction{
+			UserID:                userID,
+			Type:                  TxTypeCreditsPurchased,
+			Status:                TxStatusSucceeded,
+			Currency:              pricingCurrency(),
+			Amount:                session.AmountTotal,
+			Description:           "Token credit bundle purchased",
+			Quantity:              1,
+			ProductSlug:           "credit_bundle",
+			Provider:              "stripe",
+			ProviderTransactionID: paymentIntentID,
+			ProviderCustomerID:    customerID,
+			CustomerEmail:         m.getUserEmail(userID),
+		})
+		return nil
 
 	default:
 		log.Printf("[stripe] checkout.session.completed: unhandled mode %s", session.Mode)
@@ -464,6 +520,22 @@ func (m *Manager) HandleSubscriptionDeleted(stripeSub *stripego.Subscription) er
 		log.Printf("[stripe] WARNING: failed to downgrade user %s to free tier: %v", userID, err)
 	}
 
+	// Record cancellation transaction
+	_ = m.recordTransaction(billingTransaction{
+		UserID:                 userID,
+		Type:                   TxTypeSubscriptionCanceled,
+		Status:                 TxStatusSucceeded,
+		Currency:               pricingCurrency(),
+		Amount:                 0,
+		Description:            "Pro subscription canceled",
+		Quantity:               1,
+		ProductSlug:            "pro_subscription",
+		Provider:               "stripe",
+		ProviderSubscriptionID: stripeSub.ID,
+		ProviderCustomerID:     stripeSub.Customer.ID,
+		CustomerEmail:          m.getUserEmail(userID),
+	})
+
 	log.Printf("[stripe] subscription %s for user %s deleted; downgraded to free tier", stripeSub.ID, userID)
 	return nil
 }
@@ -494,7 +566,39 @@ func (m *Manager) HandleInvoicePaymentSucceeded(invoice *stripego.Invoice) error
 	if err != nil {
 		return nil
 	}
-	return m.upsertLocalSubscription(userID, stripeSub)
+
+	if err := m.upsertLocalSubscription(userID, stripeSub); err != nil {
+		return err
+	}
+
+	// Record renewal transaction
+	var periodStart, periodEnd *time.Time
+	if len(stripeSub.Items.Data) > 0 {
+		item := stripeSub.Items.Data[0]
+		ps := time.Unix(item.CurrentPeriodStart, 0).UTC()
+		pe := time.Unix(item.CurrentPeriodEnd, 0).UTC()
+		periodStart = &ps
+		periodEnd = &pe
+	}
+	_ = m.recordTransaction(billingTransaction{
+		UserID:                 userID,
+		Type:                   TxTypeSubscriptionRenewed,
+		Status:                 TxStatusSucceeded,
+		Currency:               pricingCurrency(),
+		Amount:                 invoice.AmountPaid,
+		Description:            "Pro subscription renewed",
+		Quantity:               1,
+		ProductSlug:            "pro_subscription",
+		Provider:               "stripe",
+		ProviderTransactionID:  invoice.ID,
+		ProviderSubscriptionID: subID,
+		ProviderCustomerID:     stripeSub.Customer.ID,
+		ProviderInvoiceID:      invoice.ID,
+		PeriodStart:            periodStart,
+		PeriodEnd:              periodEnd,
+		CustomerEmail:          m.getUserEmail(userID),
+	})
+	return nil
 }
 
 // HandleInvoicePaymentFailed handles invoice.payment_failed.
@@ -508,6 +612,31 @@ func (m *Manager) HandleInvoicePaymentFailed(invoice *stripego.Invoice) error {
 	}
 	log.Printf("[stripe] invoice.payment_failed for subscription %s (customer %s)",
 		subID, customerID)
+
+	// Record failed payment transaction
+	userID := ""
+	if customerID != "" {
+		if uid, err := m.userIDForStripeCustomer(customerID); err == nil {
+			userID = uid
+		}
+	}
+	if userID != "" {
+		_ = m.recordTransaction(billingTransaction{
+			UserID:                 userID,
+			Type:                   TxTypePaymentFailed,
+			Status:                 TxStatusFailed,
+			Currency:               pricingCurrency(),
+			Amount:                 invoice.AmountDue,
+			Description:            "Payment failed for subscription renewal",
+			Quantity:               1,
+			ProductSlug:            "pro_subscription",
+			Provider:               "stripe",
+			ProviderSubscriptionID: subID,
+			ProviderCustomerID:     customerID,
+			ProviderInvoiceID:      invoice.ID,
+			CustomerEmail:          m.getUserEmail(userID),
+		})
+	}
 	return nil
 }
 
@@ -636,8 +765,8 @@ func (m *Manager) setUserTier(userID string, tier types.TierType) error {
 }
 
 // grantCreditTokens processes a successful one-time payment for extra
-// token bundles.  One bundle = 1 000 000 tokens added to the user's
-// monthly allowance for the current period.
+// token bundles.  The bundle size is read from pricing.config.json
+// (credit_bundle_tokens field); defaults to 1,000,000 if not configured.
 func (m *Manager) grantCreditTokens(userID string, session *stripego.CheckoutSession) error {
 	// Retrieve line items to get quantity.
 	// V1CheckoutSessions.ListLineItems returns a *V1List; we fetch the first
@@ -654,9 +783,10 @@ func (m *Manager) grantCreditTokens(userID string, session *stripego.CheckoutSes
 		items = append(items, item)
 	}
 
+	bundleSize := creditBundleTokens()
 	var totalTokens int64
 	for _, item := range items {
-		totalTokens += item.Quantity * 1_000_000
+		totalTokens += item.Quantity * bundleSize
 	}
 	if totalTokens == 0 {
 		return nil
@@ -721,4 +851,88 @@ func recordToSubscription(rec *core.Record) *types.StripeSubscription {
 		sub.UpdatedAt = t.Time()
 	}
 	return sub
+}
+
+// -----------------------------------------------------------------------
+// SyncSubscription – pull subscription state from Stripe API
+// -----------------------------------------------------------------------
+
+// SyncSubscription queries Stripe for the customer's active subscriptions
+// and syncs the local DB + user tier.  This is the fallback for environments
+// where webhooks are not forwarded (e.g. local dev without Stripe CLI).
+// It also records a billing transaction if a new subscription is discovered.
+func (m *Manager) SyncSubscription(userID string) error {
+	if !m.IsConfigured() {
+		return ErrNotConfigured
+	}
+
+	customerID, err := m.getStripeCustomerID(userID)
+	if err != nil || customerID == "" {
+		// No Stripe customer yet – nothing to sync
+		return nil
+	}
+
+	// List active/trialing subscriptions for this customer
+	ctx := context.Background()
+	params := &stripego.SubscriptionListParams{
+		Customer: stripego.String(customerID),
+		Status:   stripego.String("all"),
+	}
+	iter := m.sc.V1Subscriptions.List(ctx, params)
+
+	var activeSub *stripego.Subscription
+	for sub, err := range iter.All(ctx) {
+		if err != nil {
+			return fmt.Errorf("stripe: list subscriptions: %w", err)
+		}
+		status := types.StripeSubscriptionStatus(sub.Status)
+		if status.IsActive() {
+			activeSub = sub
+			break
+		}
+	}
+
+	if activeSub == nil {
+		// No active sub on Stripe – check if we have a stale local record
+		localSub, _ := m.GetSubscription(userID)
+		if localSub != nil && localSub.IsActive() {
+			// Stripe says no active sub but local says yes – downgrade
+			if updateErr := m.updateLocalSubscription(localSub.StripeSubscriptionID, func(rec *core.Record) {
+				rec.Set("status", string(types.StripeSubCanceled))
+			}); updateErr != nil {
+				log.Printf("[stripe] sync: failed to mark stale subscription: %v", updateErr)
+			}
+			_ = m.setUserTier(userID, types.TierFree)
+		}
+		return nil
+	}
+
+	// We have an active subscription on Stripe – check if we already have it locally
+	localSub, _ := m.GetSubscription(userID)
+	isNew := localSub == nil || localSub.StripeSubscriptionID != activeSub.ID
+
+	if err := m.upsertLocalSubscription(userID, activeSub); err != nil {
+		return err
+	}
+
+	// Record billing transaction for newly discovered subscriptions
+	if isNew {
+		_ = m.recordTransaction(billingTransaction{
+			UserID:                 userID,
+			Type:                   TxTypeSubscriptionCreated,
+			Status:                 TxStatusSucceeded,
+			Currency:               pricingCurrency(),
+			Amount:                 0, // we don't have session.AmountTotal here
+			Description:            "Pro subscription created (synced from Stripe)",
+			Quantity:               1,
+			ProductSlug:            "pro_subscription",
+			Provider:               "stripe",
+			ProviderSubscriptionID: activeSub.ID,
+			ProviderCustomerID:     customerID,
+			CustomerEmail:          m.getUserEmail(userID),
+		})
+		log.Printf("[stripe] sync: discovered new subscription %s for user %s", activeSub.ID, userID)
+	}
+
+	return nil
 }

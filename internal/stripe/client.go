@@ -9,6 +9,7 @@
 package stripe
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -94,4 +95,27 @@ func newStripeClient() (*stripego.Client, error) {
 	})
 	sc := stripego.NewClient(key, stripego.WithBackends(backends))
 	return sc, nil
+}
+
+// defaultCreditBundleTokens is the fallback when pricing.config.json is unreadable.
+const defaultCreditBundleTokens int64 = 1_000_000
+
+// creditBundleTokens reads credit_bundle_tokens from pricing.config.json.
+// Falls back to 1,000,000 if the config file is missing or the field is unset.
+func creditBundleTokens() int64 {
+	configPath := os.Getenv("NANNYAPI_PRICING_CONFIG")
+	if configPath == "" {
+		configPath = "pricing.config.json"
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return defaultCreditBundleTokens
+	}
+	var cfg struct {
+		CreditBundleTokens int64 `json:"credit_bundle_tokens"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil || cfg.CreditBundleTokens <= 0 {
+		return defaultCreditBundleTokens
+	}
+	return cfg.CreditBundleTokens
 }

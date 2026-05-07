@@ -3,6 +3,7 @@ package stripe
 import (
 	"errors"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -180,5 +181,58 @@ func TestNewStripeClient_Configured(t *testing.T) {
 	}
 	if sc == nil {
 		t.Error("expected non-nil client")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// creditBundleTokens
+// ---------------------------------------------------------------------------
+
+func TestCreditBundleTokens_ReadsFromConfig(t *testing.T) {
+	// Write a temp config with a custom bundle size
+	tmpFile := t.TempDir() + "/pricing.json"
+	if err := os.WriteFile(tmpFile, []byte(`{"credit_bundle_tokens": 2000000}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NANNYAPI_PRICING_CONFIG", tmpFile)
+
+	got := creditBundleTokens()
+	if got != 2_000_000 {
+		t.Errorf("expected 2000000, got %d", got)
+	}
+}
+
+func TestCreditBundleTokens_FallsBackToDefault(t *testing.T) {
+	t.Setenv("NANNYAPI_PRICING_CONFIG", "/nonexistent/path.json")
+
+	got := creditBundleTokens()
+	if got != defaultCreditBundleTokens {
+		t.Errorf("expected %d, got %d", defaultCreditBundleTokens, got)
+	}
+}
+
+func TestCreditBundleTokens_InvalidJSON_FallsBack(t *testing.T) {
+	tmpFile := t.TempDir() + "/bad.json"
+	if err := os.WriteFile(tmpFile, []byte(`not json`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NANNYAPI_PRICING_CONFIG", tmpFile)
+
+	got := creditBundleTokens()
+	if got != defaultCreditBundleTokens {
+		t.Errorf("expected %d, got %d", defaultCreditBundleTokens, got)
+	}
+}
+
+func TestCreditBundleTokens_ZeroValue_FallsBack(t *testing.T) {
+	tmpFile := t.TempDir() + "/zero.json"
+	if err := os.WriteFile(tmpFile, []byte(`{"credit_bundle_tokens": 0}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NANNYAPI_PRICING_CONFIG", tmpFile)
+
+	got := creditBundleTokens()
+	if got != defaultCreditBundleTokens {
+		t.Errorf("expected %d, got %d", defaultCreditBundleTokens, got)
 	}
 }

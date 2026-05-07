@@ -94,6 +94,12 @@ func main() {
 			return hooks.LoadAuthContext(app)(hooks.RequireAuth()(handler))
 		}
 		stripeintegration.RegisterRoutes(app, e, stripeMgr, withAuth)
+
+		// Seed product catalog from pricing.config.json
+		if err := stripeintegration.SeedProductCatalog(app); err != nil {
+			log.Printf("[billing] WARNING: failed to seed product catalog: %v", err)
+		}
+
 		return e.Next()
 	})
 
