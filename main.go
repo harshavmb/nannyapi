@@ -16,6 +16,7 @@ import (
 	realtimeoutbox "github.com/nannyagent/nannyapi/internal/realtime"
 	"github.com/nannyagent/nannyapi/internal/reaper"
 	"github.com/nannyagent/nannyapi/internal/schedules"
+	stripeintegration "github.com/nannyagent/nannyapi/internal/stripe"
 	_ "github.com/nannyagent/nannyapi/pb_migrations"
 )
 
@@ -83,6 +84,22 @@ func main() {
 	// Reload pricing config once the app is fully bootstrapped (DB ready)
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		pricingMgr.ReloadConfig()
+		return e.Next()
+	})
+
+	// Register Stripe billing integration (optional: no-op when STRIPE_SECRET_KEY is absent)
+	stripeMgr := stripeintegration.NewManager(app)
+	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		withAuth := func(handler func(*core.RequestEvent) error) func(*core.RequestEvent) error {
+			return hooks.LoadAuthContext(app)(hooks.RequireAuth()(handler))
+		}
+		stripeintegration.RegisterRoutes(app, e, stripeMgr, withAuth)
+
+		// Seed product catalog from pricing.config.json
+		if err := stripeintegration.SeedProductCatalog(app); err != nil {
+			log.Printf("[billing] WARNING: failed to seed product catalog: %v", err)
+		}
+
 		return e.Next()
 	})
 

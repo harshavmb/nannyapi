@@ -18,7 +18,7 @@ The pricing system is **opt-in** and **configuration-driven**. When no pricing c
 
 - Daily limits reset at **midnight** every day
 - Monthly limits reset on the **1st of each month**
-- Price: **$0/month**
+- Price: **€0/month**
 
 ### Pro Tier
 
@@ -29,8 +29,20 @@ The pricing system is **opt-in** and **configuration-driven**. When no pricing c
 | Investigations | Unlimited | Unlimited |
 
 - Monthly limits reset on the **1st of each month**
-- Price: **$10/month**
-- Additional tokens can be purchased by contacting support@nannyai.dev
+- Price: **€10/month**
+- Additional tokens available via **Buy Credits** (see below)
+
+### Credit Bundles (Pro Tier Add-on)
+
+Pro subscribers who exhaust their monthly 10M token allowance can purchase additional tokens:
+
+| Bundle | Tokens | Price |
+|--------|--------|-------|
+| Credit Pack | 1,000,000 | €5 (one-time) |
+
+- Credits are added to `user_limit_overrides.monthly_token_limit` immediately on successful payment
+- Purchase via `POST /api/stripe/buy-credits` (requires active Pro subscription)
+- All values are defined in `pricing.config.json` (`credit_bundle_tokens`, `credit_bundle_price`)
 
 ### Enterprise / Custom
 
@@ -55,6 +67,9 @@ Example config file (`pricing.config.example.json` in repo root):
 ```json
 {
   "enabled": true,
+  "currency": "eur",
+  "credit_bundle_tokens": 1000000,
+  "credit_bundle_price": 5,
   "tiers": {
     "free": {
       "name": "free",

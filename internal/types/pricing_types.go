@@ -32,8 +32,11 @@ type TierConfig struct {
 
 // PricingConfig holds the full pricing configuration
 type PricingConfig struct {
-	Enabled bool                    `json:"enabled"`
-	Tiers   map[TierType]TierConfig `json:"tiers"`
+	Enabled            bool                    `json:"enabled"`
+	Currency           string                  `json:"currency"`
+	CreditBundleTokens int64                   `json:"credit_bundle_tokens"`
+	CreditBundlePrice  float64                 `json:"credit_bundle_price"`
+	Tiers              map[TierType]TierConfig `json:"tiers"`
 }
 
 // UserTierOverride represents an admin override for a specific user

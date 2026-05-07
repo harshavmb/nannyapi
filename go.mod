@@ -10,6 +10,7 @@ require (
 	github.com/pocketbase/pocketbase v0.35.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
+	github.com/stripe/stripe-go/v85 v85.1.0
 	golang.org/x/crypto v0.46.0
 )
 

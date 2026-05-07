@@ -1,5 +1,8 @@
 {
   "enabled": true,
+  "currency": "eur",
+  "credit_bundle_tokens": 1000000,
+  "credit_bundle_price": 5,
   "tiers": {
     "free": {
       "name": "free",
